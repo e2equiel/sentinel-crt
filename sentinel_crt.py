@@ -133,16 +133,16 @@ class SentinelApp:
         # Grid and Graph Resources
         self.grid_cell_size = 40
         self.patterns_green = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['default'] + (200,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['default'] + (200,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['default'] + (160,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['default'] + (160,))
         }
         self.patterns_orange = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['warning'] + (200,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['warning'] + (200,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['warning'] + (160,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['warning'] + (160,))
         }
         self.patterns_red = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['danger'] + (200,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['danger'] + (200,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['danger'] + (160,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['danger'] + (160,))
         }
         self.zoom_grid_map = []; self.zoom_grid_update_timer = 0
         self.update_zoom_grid_map()
@@ -574,7 +574,7 @@ class SentinelApp:
         elif self.alert_level == "danger": patterns = self.patterns_red
         else: patterns = self.patterns_green
 
-        grid_color = self.current_theme_color + (100,)
+        grid_color = self.current_theme_color + (160,)
 
         with self.data_lock:
             for r, row in enumerate(self.zoom_grid_map):
