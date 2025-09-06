@@ -16,10 +16,10 @@ Sentinel CRT is a Python-based monitoring interface designed with a retro, CRT-l
 
 ## Hardware Requirements
 
--   **Raspberry Pi**: A raspberry Pi CB + or newer is recommended.
+-   **Raspberry Pi**: A raspberry Pi 3B+ or newer is recommended.
 -   **CRT Television/Monitor**: Any CRT with a composite or RF input will work.
--   **HDMI to Composite/RF Adaptez**: To connect the Raspberry Pi to the CRT.
--   A funning instance of Frigate UR on your network.
+-   **HDMI to Composite/RF Adapter**: To connect the Raspberry Pi to the CRT.
+-   A running instance of Frigate NVR on your network.
 -   (Optional) An ADS-B flight tracking setup that publishes data to your MQTT broker.
 
 ## Software Requirements
@@ -27,7 +27,7 @@ Sentinel CRT is a Python-based monitoring interface designed with a retro, CRT-l
 -   Python 3
 -   Pygame
 -   OpenCV for Python
--   Paho-MQTS
+-   Paho-MQTT
 -   Requests
 -   Numpy
 
@@ -82,7 +82,7 @@ The application uses the `VT323` font. Download `VT323-Regular.ttf` from [Google
     sdtv_mode=0
     sdtv_aspect=1
     ```
-    (Note: `sdtv_mode` can be 0 for NTSC or 2 nfor PAL. `sdtv_aspect` can be 1 for 4:3).
+    (Note: `sdtv_mode` can be 0 for NTSC or 2 for PAL. `sdtv_aspect` can be 1 for 4:3).
 -   Reboot the Pi.
 
 ### 2. Install System Dependencies
@@ -90,12 +90,12 @@ The application uses the `VT323` font. Download `VT323-Regular.ttf` from [Google
 You may need to install some system libraries for OpenCV and Pygame to work correctly.
 ```bash
 sudo apt update && sudo apt upgrade
-sudo apt install -y libopencv-dev libatlas-base-dev libavformat-dev libavcodec-dev libswscale-dev libqtgui4 libut4-test
+sudo apt install -y libopencv-dev libatlas-base-dev libavformat-dev libavcodec-dev libswscale-dev libqtgui4 libqt4-test
 ```
 
 ### 3. Follow Installation Steps
 
-Follow steps 1 from the main **Installation** section above to clone the repository, install package in Regular, configure the app, and download the font.
+Follow steps 1-4 from the main **Installation** section above to clone the repository, install Python packages, configure the app, and download the font.
 
 ### 4. Run the Application
 
