@@ -1,0 +1,5 @@
+pygame
+paho-mqtt
+opencv-python
+numpy
+requests

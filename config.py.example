@@ -1,0 +1,68 @@
+# This is an example configuration file.
+# 1. RENAME this file to `config.py`.
+# 2. EDIT the values below to match your setup.
+# This file is ignored by git, so your private credentials are safe.
+
+# --- Theme Colors ---
+THEME_COLORS = {
+    "default": (0, 255, 65),    # Green
+    "warning": (255, 165, 0),   # Orange
+    "danger": (255, 0, 0),      # Red
+}
+
+# --- Main Configuration ---
+CONFIG = {
+    # --- General & Display ---
+    "screen_width": 640,
+    "screen_height": 480,
+    "fps": 30,
+    "startup_screen": "auto", # Options: "camera", "radar", "auto"
+    "show_header": True,
+    "margins": {
+        "top": 10,
+        "bottom": 10,
+        "left": 10,
+        "right": 10
+    },
+    
+    # --- MQTT Configuration ---
+    "mqtt_host": "YOUR_MQTT_BROKER_IP",
+    "mqtt_port": 1883,
+    "mqtt_user": "your_mqtt_user",
+    "mqtt_password": "your_mqtt_password",
+    "frigate_topic": "frigate/events",
+    "flight_topic": "flights/overhead",
+
+    # --- Camera Configuration ---
+    "camera_name": "your_camera_name_in_frigate", # e.g., "front_door"
+    "camera_rtsp_url": "rtsp://user:password@camera.ip:554/stream_path",
+    "frigate_host": "your_frigate_host_ip", 
+    "frigate_resolution": (1920, 1080), # The native resolution of your camera stream
+    
+    # --- Detection & Zoom ---
+    "bbox_delay": 0.4, # Seconds to delay processing events, helps smooth out bounding boxes
+    "zoom_labels": ["person", "car"], # Frigate labels that will trigger auto-zoom
+    "zoom_level": 2.5, # How much to zoom in on a detected object
+    "zoom_reset_time": 5, # Seconds to stay zoomed in after the last detection
+    "zoom_speed": 0.08, # How quickly to animate the zoom (lower is slower)
+
+    # --- Alert Zones ---
+    # Map your Frigate zones to alert levels.
+    "alert_zones": {
+        "warning": ["street", "driveway"],
+        "danger": ["porch", "garage_interior"]
+    },
+
+    # --- Map/Flight Configuration ---
+    # You need a free Mapbox account for this.
+    "mapbox_user": "your_mapbox_username",
+    "mapbox_style_id": "your_mapbox_style_id",
+    "mapbox_token": "pk.YOUR_MAPBOX_PUBLIC_ACCESS_TOKEN",
+    "map_latitude": 0.0, # Your home latitude
+    "map_longitude": 0.0, # Your home longitude
+    "map_radius_m": 15000, # The radius of the radar screen in meters
+    "map_distance_rings": 3, # How many concentric distance rings to draw
+    "map_radial_lines": True, # Draw cardinal direction lines
+    "flight_screen_timeout": 10, # Seconds to show the radar screen after a flight is detected
+    "min_flight_altitude_ft": 1000 # Ignore flights below this altitude (in feet)
+}
