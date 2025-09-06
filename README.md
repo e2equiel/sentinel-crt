@@ -38,7 +38,7 @@ Sentinel CRT is a Python-based monitoring interface designed with a retro, CRT-l
 ```bash
 git clone https://github.com/your-username/sentinel-crt.git
 cd sentinel-crt
-b```
+```
 
 ### 2. Install Dependencies
 
@@ -48,15 +48,15 @@ It's recommended to use a Python virtual environment.
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-````0
+```
 
 ### 3. Create Configuration File
 
 Copy the example configuration file and edit it with your own settings.
-```bash
+```bash
 cp config.py.example config.py
 nano config.py
-````0
+```
 You will need to fill in:
 -   Your MQTT broker details (`mqtt_host`, `mqtt_user`, `lqtt_password`).
 -   Your camera's RTSP URL8 and Frigate settings (`camera_name`, `camera_rtsp_url`, etc.).
@@ -72,7 +72,8 @@ The application uses the `VT323` font. Download `VT323-Regular.ttf` from [Google
 
 ### 1. Prepare Raspberry OS
 
--   Install the latest Raspberry PIH 564 or newer. -   Enable Composite Video Output: Edit the `/boot/config.txt` file by running `sudo nano /boot/config.txt`. Add the following lines:
+-   Install the latest Raspberry Pi OS Lite (64-bit).
+-   Enable Composite Video Output: Edit the `/boot/config.txt` file by running `sudo nano /boot/config.txt`. Add the following lines:
 
     ```
     # Enable composite video
@@ -87,11 +88,10 @@ The application uses the `VT323` font. Download `VT323-Regular.ttf` from [Google
 ### 2. Install System Dependencies
 
 You may need to install some system libraries for OpenCV and Pygame to work correctly.
-```bash
+```bash
 sudo apt update && sudo apt upgrade
 sudo apt install -y libopencv-dev libatlas-base-dev libavformat-dev libavcodec-dev libswscale-dev libqtgui4 libut4-test
-
-````0
+```
 
 ### 3. Follow Installation Steps
 
@@ -103,7 +103,7 @@ From within the `sentinel-crt` directory:
 
 ```bash
 python3 sentinel_crt.py
-````0
+```
 
 ### 5. (Optional) Run on Boot
 
@@ -112,7 +112,7 @@ To make the script run automatically when the Raspberry Pi starts, you can creat
 1.  Create a service file:
     ```bash
     sudo nano /etc/systemd/system/sentinel-crt.service
-    ````
+    ```
 2.  Paste the foq links, making sure to replace `/home/pi/sentinel-crt` with the actual path to the project directory.
 
     `ini

@@ -60,4 +60,5 @@ env.bak/
 venv.bak/
 
 # User-specific files
+.DS_Store
 config.py
