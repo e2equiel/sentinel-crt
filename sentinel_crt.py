@@ -21,7 +21,6 @@ import config
 # We can keep them here if they are static, but moving them to config.py is also an option.
 COLOR_BLACK = (0, 0, 0)
 COLOR_WHITE = (220, 220, 220) 
-COLOR_GRAPH_GRID = (0, 255, 65, 40)
 COLOR_YELLOW = (255, 255, 0)
 COLOR_RING = (0, 255, 65, 70) 
 
@@ -134,16 +133,16 @@ class SentinelApp:
         # Grid and Graph Resources
         self.grid_cell_size = 40
         self.patterns_green = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['default'] + (120,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['default'] + (120,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['default'] + (200,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['default'] + (200,))
         }
         self.patterns_orange = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['warning'] + (120,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['warning'] + (120,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['warning'] + (200,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['warning'] + (200,))
         }
         self.patterns_red = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['danger'] + (120,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['danger'] + (120,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['danger'] + (200,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['danger'] + (200,))
         }
         self.zoom_grid_map = []; self.zoom_grid_update_timer = 0
         self.update_zoom_grid_map()
@@ -200,7 +199,7 @@ class SentinelApp:
 
     def create_tiled_pattern_surface(self, pattern_type, size, color):
         base_pattern_size = 10
-        base_surface = pygame.Surface((base_pattern_size, base_pattern_size), pygame.SRCALPHA)
+        base_surface = pygame.Surface((base_pattern_size + 1, base_pattern_size), pygame.SRCALPHA)
         if pattern_type == 'dots': pygame.draw.circle(base_surface, color, (base_pattern_size // 2, base_pattern_size // 2), 1)
         elif pattern_type == 'lines': pygame.draw.line(base_surface, color, (0, base_pattern_size), (base_pattern_size, 0), 1)
         tiled_surface = pygame.Surface((size, size), pygame.SRCALPHA)
@@ -410,7 +409,7 @@ class SentinelApp:
         with self.data_lock:
             self.mqtt_activity *= 0.90
             graph_h = self.analysis_graph_rect.height
-            new_y = (graph_h / 2) - self.mqtt_activity + (random.random() - 0.5) * 8
+            new_y = (graph_h - 15) - self.mqtt_activity + (random.random() - 0.5) * 8
             self.graph_data.append(np.clip(new_y, 5, graph_h - 5))
 
     def update_alert_level(self):
@@ -780,8 +779,28 @@ class SentinelApp:
             ("LAST EVENT:", self.last_event_time), ("TARGET:", self.target_label), ("CONFIDENCE:", self.target_score)
         ]
         for i, (label, value) in enumerate(texts):
-            self.screen.blit(self.font_small.render(label, True, color), (self.col1_rect.x, y_offset + (i * row_h)))
-            self.screen.blit(self.font_small.render(value, True, COLOR_WHITE), (self.col1_rect.x + 110, y_offset + (i * row_h)))
+            y_pos = y_offset + (i * row_h)
+
+            label_surface = self.font_small.render(label, True, color)
+            label_rect = label_surface.get_rect()
+            
+            value_surface = self.font_small.render(str(value), True, COLOR_WHITE)
+            value_rect = value_surface.get_rect()
+
+            label_rect.topleft = (self.col1_rect.x, y_pos)
+            value_rect.topright = (self.col1_rect.right, y_pos)
+
+            line_y = label_rect.centery
+            start_x = label_rect.right + 4
+            end_x = value_rect.left - 4
+
+            if start_x < end_x:
+                start_pos = (start_x, line_y)
+                end_pos = (end_x, line_y)
+                draw_dashed_line(self.screen, color, start_pos, end_pos, 1, 2)
+            
+            self.screen.blit(label_surface, label_rect)
+            self.screen.blit(value_surface, value_rect)
             
         with self.data_lock:
             if self.snapshot_surface:
@@ -815,8 +834,8 @@ class SentinelApp:
         
         grid_surface = pygame.Surface(graph_rect.size, pygame.SRCALPHA)
         cell_size = 10
-        for x in range(0, graph_rect.width, cell_size): pygame.draw.line(grid_surface, COLOR_GRAPH_GRID, (x, 0), (x, graph_rect.height), 1)
-        for y in range(0, graph_rect.height, cell_size): pygame.draw.line(grid_surface, COLOR_GRAPH_GRID, (0, y), (graph_rect.width, y), 1)
+        for x in range(0, graph_rect.width, cell_size): pygame.draw.line(grid_surface, color + (100,), (x, 0), (x, graph_rect.height), 1)
+        for y in range(0, graph_rect.height, cell_size): pygame.draw.line(grid_surface, color + (100,), (0, y), (graph_rect.width, y), 1)
         self.screen.blit(grid_surface, graph_rect.topleft)
         pygame.draw.rect(self.screen, color, graph_rect, 1)
         
