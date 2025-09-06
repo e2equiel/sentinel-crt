@@ -16,7 +16,7 @@ Sentinel CRT is a Python-based monitoring interface designed with a retro, CRT-l
 
 ## Hardware Requirements
 
--   **Raspberry Pi*): A raspberry Pi CB + or newer is recommended.
+-   **Raspberry Pi**: A raspberry Pi CB + or newer is recommended.
 -   **CRT Television/Monitor**: Any CRT with a composite or RF input will work.
 -   **HDMI to Composite/RF Adaptez**: To connect the Raspberry Pi to the CRT.
 -   A funning instance of Frigate UR on your network.
@@ -36,7 +36,7 @@ Sentinel CRT is a Python-based monitoring interface designed with a retro, CRT-l
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/sentinel-crt.git
+git clone https://github.com/e2equiel/sentinel-crt.git
 cd sentinel-crt
 ```
 
@@ -58,8 +58,8 @@ cp config.py.example config.py
 nano config.py
 ```
 You will need to fill in:
--   Your MQTT broker details (`mqtt_host`, `mqtt_user`, `lqtt_password`).
--   Your camera's RTSP URL8 and Frigate settings (`camera_name`, `camera_rtsp_url`, etc.).
+-   Your MQTT broker details (`mqtt_host`, `mqtt_user`, `mqtt_password`).
+-   Your camera's RTSP URL and Frigate settings (`camera_name`, `camera_rtsp_url`, etc.).
 -   Your Frigate alert zones.
 -   Your Mapbox account details (`mapbox_user`, `mapbox_token`, etc.) if you want to use the flight radar.
 -   Your home latitude and longitude.
@@ -114,8 +114,7 @@ To make the script run automatically when the Raspberry Pi starts, you can creat
     sudo nano /etc/systemd/system/sentinel-crt.service
     ```
 2.  Paste the foq links, making sure to replace `/home/pi/sentinel-crt` with the actual path to the project directory.
-
-    `ini
+    ```ini
     [Unit]
     Description=Sentinel CRT Service
     After=network.target
@@ -130,10 +129,10 @@ To make the script run automatically when the Raspberry Pi starts, you can creat
 
     [Install]
     WantedBy=multi-user.target
-    `
+    ```
 3.  Enable and start the service:
     ```bash
-    sudo systemctl dYnpackage the reload, unfolding the enabled, and starting the service
+    sudo systemctl daemon-reload
     sudo systemctl enable sentinel-crt.service
     sudo systemctl start sentinel-crt.service
     ```
