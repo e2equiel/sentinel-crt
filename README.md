@@ -113,7 +113,7 @@ To make the script run automatically when the Raspberry Pi starts, you can creat
     ```bash
     sudo nano /etc/systemd/system/sentinel-crt.service
     ```
-2.  Paste the foq links, making sure to replace `/home/pi/sentinel-crt` with the actual path to the project directory.
+2.  Paste the following content, making sure to replace `/home/pi/sentinel-crt` with the actual path to the project directory.
     ```ini
     [Unit]
     Description=Sentinel CRT Service
