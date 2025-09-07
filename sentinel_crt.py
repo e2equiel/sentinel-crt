@@ -61,6 +61,36 @@ def draw_dashed_line(surf, color, start_pos, end_pos, width=1, dash_length=5):
         end = (x1 + dx * (i * 2 + 1) / dashes, y1 + dy * (i * 2 + 1) / dashes)
         pygame.draw.line(surf, color, start, end, width)
 
+def draw_diagonal_pattern(surface, color, rect, angle, spacing=5, line_width=1):
+    """Draws a diagonal line pattern within a specific rectangular area."""
+    # 1. Create a temporary surface large enough to cover the original rect after rotation.
+    #    The length of the diagonal of the rect is a safe size.
+    diagonal = int(math.hypot(rect.width, rect.height))
+    temp_surface = pygame.Surface((diagonal, diagonal), pygame.SRCALPHA)
+
+    # 2. Draw simple vertical lines onto the temporary surface.
+    for x in range(0, diagonal, spacing):
+        pygame.draw.line(
+            temp_surface,
+            color,
+            (x, 0),
+            (x, diagonal),
+            line_width
+        )
+
+    # 3. Rotate the temporary surface to the desired angle.
+    rotated_surface = pygame.transform.rotozoom(temp_surface, angle, 1)
+
+    # 4. Calculate the position to blit the rotated surface so it's centered on the target rect.
+    rotated_rect = rotated_surface.get_rect(center=rect.center)
+
+    # 5. Blit the rotated surface onto the main screen, but clip it to the original rect's area.
+    #    This is the key step to ensure the pattern only appears inside the rect.
+    original_clip = surface.get_clip()
+    surface.set_clip(rect)
+    surface.blit(rotated_surface, rotated_rect)
+    surface.set_clip(original_clip) # Restore the original clipping area
+
 class SentinelApp:
     def __init__(self):
         pygame.init()
@@ -546,6 +576,7 @@ class SentinelApp:
         
         pygame.draw.line(self.screen, color, (header_rect.left, header_rect.bottom), (header_rect.right, header_rect.bottom), 2)
         title_surface = self.font_large.render(self.header_title_text, True, color)
+        title_rect = title_surface.get_rect()
         self.screen.blit(title_surface, (header_rect.left, header_rect.top + 2))
         
         bar_x = header_rect.right - 5 * 8
@@ -557,7 +588,11 @@ class SentinelApp:
         spinner_char_surf = self.font_medium.render("+", True, color)
         original_spinner_rect = spinner_char_surf.get_rect(right=sys_load_rect.left - 10, centery=header_rect.centery)
         rotated_spinner = pygame.transform.rotate(spinner_char_surf, self.spinner_angle)
-        self.screen.blit(rotated_spinner, rotated_spinner.get_rect(center=original_spinner_rect.center))
+        rotated_spinner_rect = rotated_spinner.get_rect(center=original_spinner_rect.center)
+        self.screen.blit(rotated_spinner, rotated_spinner_rect)
+
+        pattern_rect = pygame.Rect(title_rect.right + 14, header_rect.top + 6, sys_load_rect.left - (title_rect.right + 38), header_rect.height - 12)
+        draw_diagonal_pattern(self.screen, color, pattern_rect, -45, 8, 4)
 
     def draw_video_feed(self):
         with self.data_lock:
@@ -646,6 +681,11 @@ class SentinelApp:
         num_rings = config.CONFIG.get("map_distance_rings", 3)
         radius_step_m = config.CONFIG['map_radius_m'] / num_rings
         max_radius_px = int(config.CONFIG['map_radius_m'] * pixels_per_meter)
+
+        panel_surface = pygame.Surface(self.map_area_rect.size, pygame.SRCALPHA)
+        panel_surface.fill((0, 0, 0, 120)) 
+        pygame.draw.rect(panel_surface, config.THEME_COLORS['default'], panel_surface.get_rect(), 1)
+        self.screen.blit(panel_surface, self.map_area_rect.topleft)
         
         if config.CONFIG.get("map_radial_lines", False):
             cardinal_points = {"N": 0, "NE": 45, "E": 90, "SE": 135, "S": 180, "SW": 225, "W": 270, "NW": 315}
@@ -746,14 +786,14 @@ class SentinelApp:
             }
             for label, value in details.items():
                 panel_surface.blit(self.font_small.render(label, True, config.THEME_COLORS['default']), (10, y_offset))
-                panel_surface.blit(self.font_small.render(value, True, COLOR_WHITE), (10, y_offset + 14))
-                y_offset += 32
+                panel_surface.blit(self.font_medium.render(value, True, COLOR_WHITE), (10, y_offset + 14))
+                y_offset += 36
             
             pygame.draw.line(panel_surface, config.THEME_COLORS['default'], (10, y_offset), (self.flight_panel_rect.width - 10, y_offset), 1)
             y_offset += 8
             panel_surface.blit(self.font_small.render("ROUTE:", True, config.THEME_COLORS['default']), (10, y_offset))
             route_text = f"{flight.get('airport_origin_code', 'N/A')} > {flight.get('airport_destination_code', 'N/A')}"
-            panel_surface.blit(self.font_small.render(route_text, True, COLOR_WHITE), (10, y_offset + 14))
+            panel_surface.blit(self.font_medium.render(route_text, True, COLOR_WHITE), (10, y_offset + 14))
             
             if photo:
                 panel_w = self.flight_panel_rect.width - 20 
