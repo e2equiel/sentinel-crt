@@ -1,7 +1,8 @@
 # Sentinel CRT
 
-<!-- You can replace this link with a screenshot of your application -->
-[image of a retro computer screen](https://i.imgur.com/uCgKqf3.png)
+![Camera View](./docs/camera.png)
+
+![Radar View](./docs/radar.png)
 
 Sentinel CRT is a Python-based monitoring interface designed with a retro, CRT-like aesthetic. It's built to run on a Raspberry Pi connected to a CRT television, providing a heads-up display for real-time events from a [Frigate NVR](https://frigate.video/) instance and nearby air traffic.
 
