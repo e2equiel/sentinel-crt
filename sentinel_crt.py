@@ -95,8 +95,10 @@ class SentinelApp:
     def __init__(self):
         pygame.init()
         # Use config dictionary for settings
-        self.screen = pygame.display.set_mode((config.CONFIG["screen_width"], config.CONFIG["screen_height"]))
-        pygame.display.set_caption("S.E.N.T.I.N.E.L. v1.0")
+        #self.screen = pygame.display.set_mode((config.CONFIG["screen_width"], config.CONFIG["screen_height"]))
+        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        pygame.mouse.set_visible(False)
+        #pygame.display.set_caption("S.E.N.T.I.N.E.L. v1.0")
         self.clock = pygame.time.Clock()
 
         try:
