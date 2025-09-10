@@ -578,8 +578,8 @@ class SentinelApp:
         
         pygame.draw.line(self.screen, color, (header_rect.left, header_rect.bottom), (header_rect.right, header_rect.bottom), 2)
         title_surface = self.font_large.render(self.header_title_text, True, color)
-        title_rect = title_surface.get_rect()
-        self.screen.blit(title_surface, (header_rect.left, header_rect.top + 2))
+        title_rect = title_surface.get_rect(topleft=(header_rect.left, header_rect.top + 2))
+        self.screen.blit(title_surface, title_rect)
         
         bar_x = header_rect.right - 5 * 8
         for i, height in enumerate(self.level_bars_heights):
@@ -597,9 +597,8 @@ class SentinelApp:
         pattern_right_margin = 24
         pattern_start_x = title_rect.right + pattern_left_margin
         pattern_end_x = sys_load_rect.left - pattern_right_margin
-        pattern_width = pattern_end_x - pattern_start_x
-        if pattern_width < 0:
-            pattern_width = 0
+        pattern_width = max(0, pattern_end_x - pattern_start_x)
+
         pattern_rect = pygame.Rect(
             pattern_start_x,
             header_rect.top + 6,
