@@ -593,7 +593,19 @@ class SentinelApp:
         rotated_spinner_rect = rotated_spinner.get_rect(center=original_spinner_rect.center)
         self.screen.blit(rotated_spinner, rotated_spinner_rect)
 
-        pattern_rect = pygame.Rect(title_rect.right + 14, header_rect.top + 6, sys_load_rect.left - (title_rect.right + 38), header_rect.height - 12)
+        pattern_left_margin = 14
+        pattern_right_margin = 24
+        pattern_start_x = title_rect.right + pattern_left_margin
+        pattern_end_x = sys_load_rect.left - pattern_right_margin
+        pattern_width = pattern_end_x - pattern_start_x
+        if pattern_width < 0:
+            pattern_width = 0
+        pattern_rect = pygame.Rect(
+            pattern_start_x,
+            header_rect.top + 6,
+            pattern_width,
+            header_rect.height - 12
+        )
         draw_diagonal_pattern(self.screen, color, pattern_rect, -45, 8, 4)
 
     def draw_video_feed(self):
