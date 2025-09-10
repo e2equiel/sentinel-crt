@@ -61,35 +61,22 @@ def draw_dashed_line(surf, color, start_pos, end_pos, width=1, dash_length=5):
         end = (x1 + dx * (i * 2 + 1) / dashes, y1 + dy * (i * 2 + 1) / dashes)
         pygame.draw.line(surf, color, start, end, width)
 
-def draw_diagonal_pattern(surface, color, rect, angle, spacing=5, line_width=1):
-    """Draws a diagonal line pattern within a specific rectangular area."""
-    # 1. Create a temporary surface large enough to cover the original rect after rotation.
-    #    The length of the diagonal of the rect is a safe size.
+def draw_diagonal_pattern(surface, color, rect, angle, spacing=5, line_width=1, phase=0):
     diagonal = int(math.hypot(rect.width, rect.height))
     temp_surface = pygame.Surface((diagonal, diagonal), pygame.SRCALPHA)
 
-    # 2. Draw simple vertical lines onto the temporary surface.
-    for x in range(0, diagonal, spacing):
-        pygame.draw.line(
-            temp_surface,
-            color,
-            (x, 0),
-            (x, diagonal),
-            line_width
-        )
+    phase_int = int(phase)
+    for x in range(-diagonal, diagonal, spacing):
+        x_pos = x + (phase_int % spacing)
+        pygame.draw.line(temp_surface, color, (x_pos, 0), (x_pos, diagonal), line_width)
 
-    # 3. Rotate the temporary surface to the desired angle.
     rotated_surface = pygame.transform.rotozoom(temp_surface, angle, 1)
-
-    # 4. Calculate the position to blit the rotated surface so it's centered on the target rect.
     rotated_rect = rotated_surface.get_rect(center=rect.center)
 
-    # 5. Blit the rotated surface onto the main screen, but clip it to the original rect's area.
-    #    This is the key step to ensure the pattern only appears inside the rect.
     original_clip = surface.get_clip()
     surface.set_clip(rect)
     surface.blit(rotated_surface, rotated_rect)
-    surface.set_clip(original_clip) # Restore the original clipping area
+    surface.set_clip(original_clip)
 
 class SentinelApp:
     def __init__(self):
@@ -159,6 +146,8 @@ class SentinelApp:
         self.scanner_pos = 0; self.scanner_dir = 2; self.spinner_angle = 0
         self.sys_load_string = "000000"; self.sys_load_update_timer = 0
         self.level_bars_heights = [random.randint(2, 18) for _ in range(5)]; self.level_bars_update_timer = 0
+        self.pattern_phase = 0.0
+        self.pattern_speed_px_s = 10.0
         
         self.calculate_layout()
         
@@ -472,6 +461,8 @@ class SentinelApp:
     def update_visual_effects(self):
         now = time.time()
         self.spinner_angle += 4
+        dt = self.clock.get_time() / 1000.0
+        self.pattern_phase += self.pattern_speed_px_s * dt
         if now > self.sys_load_update_timer:
             self.sys_load_string, self.sys_load_update_timer = f"{random.randint(0, 0xFFFFFF):06X}", now + 0.2
         if now > self.level_bars_update_timer:
@@ -593,7 +584,7 @@ class SentinelApp:
         rotated_spinner_rect = rotated_spinner.get_rect(center=original_spinner_rect.center)
         self.screen.blit(rotated_spinner, rotated_spinner_rect)
 
-        pattern_left_margin = 14
+        pattern_left_margin = 10
         pattern_right_margin = 24
         pattern_start_x = title_rect.right + pattern_left_margin
         pattern_end_x = sys_load_rect.left - pattern_right_margin
@@ -605,7 +596,7 @@ class SentinelApp:
             pattern_width,
             header_rect.height - 12
         )
-        draw_diagonal_pattern(self.screen, color, pattern_rect, -45, 8, 4)
+        draw_diagonal_pattern(self.screen, color, pattern_rect, -45, 8, 4, phase=self.pattern_phase)
 
     def draw_video_feed(self):
         with self.data_lock:
