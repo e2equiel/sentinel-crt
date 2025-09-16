@@ -376,6 +376,7 @@ class SentinelApp:
             self.mqtt_status = "CONNECTED"
             client.subscribe(config.CONFIG["frigate_topic"])
             client.subscribe(config.CONFIG["flight_topic"])
+            client.subscribe(config.CONFIG["mqtt_restart_topic"])
         else:
             print(f"Failed to connect to MQTT, code: {reason_code}")
             self.mqtt_status = f"FAILED ({reason_code.value})"
