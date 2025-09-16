@@ -100,6 +100,7 @@ class SentinelApp:
 
         self.running = True
         self.data_lock = threading.RLock()
+        self.reset_pending = False
         
         # Application States
         self.current_screen = config.CONFIG["startup_screen"] if config.CONFIG["startup_screen"] != "auto" else "camera"
@@ -170,11 +171,81 @@ class SentinelApp:
         self.graph_data = deque(maxlen=self.analysis_graph_rect.width)
 
         self.start_mqtt_client()
+        self.video_thread = None
+        self.video_thread_running = False
         self.start_video_capture()
 
         # Load map on startup if needed
         if self.current_screen == "radar":
             threading.Thread(target=self.update_map_tiles, daemon=True).start()
+
+    def _execute_hard_reset(self):
+        """
+        Executes a full reset of the application state, including MQTT and Video threads.
+        This should be called from the main application thread.
+        """
+        print("INFO: Executing hard reset...")
+        
+        # 1. Stop background services
+        print("INFO: Stopping background services...")
+        # Stop MQTT client
+        self.mqtt_client.loop_stop()
+        self.mqtt_client.disconnect()
+        print("INFO: MQTT client stopped.")
+        
+        # Stop video thread
+        if self.video_thread and self.video_thread.is_alive():
+            self.video_thread_running = False
+            self.video_thread.join(timeout=5) # Wait for the thread to finish
+            if self.video_thread.is_alive():
+                print("WARNING: Video thread did not stop in time.")
+            else:
+                print("INFO: Video capture thread stopped.")
+
+        # 2. Reset application state variables
+        print("INFO: Resetting application state...")
+        with self.data_lock:
+            self.mqtt_status = "CONNECTING..."
+            self.video_status = "INITIALIZING"
+            self.current_screen = config.CONFIG["startup_screen"] if config.CONFIG["startup_screen"] != "auto" else "camera"
+            self.map_surface = None
+            self.map_status = "NO DATA"
+            
+            self.detection_buffer.clear()
+            self.active_detections = {}
+            self.last_event_time = "--"
+            self.target_label = "--"
+            self.target_score = "--"
+            self.snapshot_surface = None
+            self.mqtt_activity = 0.0
+
+            self.alert_level = "none"
+            self.current_theme_color = config.THEME_COLORS['default']
+            self.header_title_text = "S.E.N.T.I.N.E.L. v1.0"
+
+            self.active_flights = []
+            self.closest_flight = None
+            self.closest_flight_photo_surface = None
+            self.last_closest_flight_id = None
+            self.flight_screen_timer = 0
+            
+            src_w, src_h = config.CONFIG["frigate_resolution"]
+            self.is_zoomed = False
+            self.show_zoom_grid = False
+            self.zoom_target_rect = pygame.Rect(0, 0, src_w, src_h)
+            self.current_zoom_rect = self.zoom_target_rect.copy()
+            
+            self.graph_data.clear()
+
+        # 3. Restart services
+        print("INFO: Restarting background services...")
+        self.start_mqtt_client()
+        self.start_video_capture()
+        
+        if self.current_screen == "radar":
+            threading.Thread(target=self.update_map_tiles, daemon=True).start()
+
+        print("INFO: Hard reset complete.")
 
     def calculate_layout(self):
         margins = config.CONFIG['margins']
@@ -257,23 +328,33 @@ class SentinelApp:
             self.mqtt_status = "ERROR"
 
     def start_video_capture(self):
-        threading.Thread(target=self.video_capture_thread, daemon=True).start()
+        """Starts the video capture thread."""
+        if self.video_thread and self.video_thread.is_alive():
+            print("WARNING: Video capture thread is already running.")
+            return
+        
+        self.video_thread_running = True
+        self.video_thread = threading.Thread(target=self.video_capture_thread, daemon=True)
+        self.video_thread.start()
 
     def video_capture_thread(self):
         reconnect_delay = 5
-        while self.running:
+        while self.video_thread_running:
             print("Connecting to video stream...")
             cap = cv2.VideoCapture(config.CONFIG["camera_rtsp_url"])
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
             if not cap.isOpened():
                 with self.data_lock: self.video_status = "ERROR"
                 print(f"Could not open stream. Retrying in {reconnect_delay} seconds...")
                 time.sleep(reconnect_delay)
                 continue
+
             with self.data_lock: self.video_status = "ONLINE"
             print("Video connection established.")
             target_w, target_h = self.main_area_rect.size
-            while self.running:
+
+            while self.video_thread_running:
                 ret, frame = cap.read()
                 if not ret:
                     with self.data_lock: self.video_status = "RECONNECTING..."; self.current_video_frame = None
@@ -287,7 +368,7 @@ class SentinelApp:
                 rotated_frame = np.rot90(np.fliplr(cv2.cvtColor(final_frame, cv2.COLOR_BGR2RGB)))
                 with self.data_lock: self.current_video_frame = pygame.surfarray.make_surface(rotated_frame)
             cap.release()
-            if self.running: time.sleep(reconnect_delay)
+            if self.video_thread_running: time.sleep(reconnect_delay)
 
     def on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code.value == 0:
@@ -306,6 +387,14 @@ class SentinelApp:
 
     def on_message(self, client, userdata, msg):
         try:
+            # Check for reset command first
+            if msg.topic == config.CONFIG.get("mqtt_restart_topic"):
+                payload_str = msg.payload.decode('utf-8')
+                if payload_str == config.CONFIG.get("mqtt_restart_payload"):
+                    print("INFO: Restart command received. Flagging for reset.")
+                    self.reset_pending = True # Set the flag for the main loop
+                    return
+
             payload = json.loads(msg.payload)
             if msg.topic == config.CONFIG["frigate_topic"]: 
                 self.detection_buffer.append((time.time(), payload))
@@ -313,8 +402,11 @@ class SentinelApp:
             elif msg.topic == config.CONFIG["flight_topic"]: 
                 self.handle_flight_data(payload)
                 with self.data_lock: self.mqtt_activity += 5.0
+
         except json.JSONDecodeError: 
             print(f"Error decoding MQTT JSON from topic {msg.topic}.")
+        except Exception as e:
+            print(f"An error occurred in on_message: {e}")
     
     def handle_flight_data(self, flights):
         flight_list = flights if isinstance(flights, list) else ([flights] if flights else [])
@@ -410,6 +502,11 @@ class SentinelApp:
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE): self.running = False
     
     def update(self):
+        if self.reset_pending:
+            self._execute_hard_reset()
+            self.reset_pending = False # Reset the flag after execution
+            return # Skip the rest of the update cycle for this frame
+        
         self.update_detections()
         self.update_alert_level()
         
