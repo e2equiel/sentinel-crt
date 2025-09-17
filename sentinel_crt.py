@@ -158,6 +158,8 @@ class SentinelApp:
         self.current_idle_index = 0
         self.idle_screen_timer = 0
         self.sphere_rotation_angle = 0
+        self.planet_angles = [random.uniform(0, 2 * math.pi) for _ in range(4)] # Ángulos iniciales para 4 planetas
+        self.asteroid_path_progress = 0.0
         
         self.calculate_layout()
         
@@ -552,6 +554,17 @@ class SentinelApp:
         self.sphere_rotation_angle += 0.005
         if self.sphere_rotation_angle > math.pi * 2:
             self.sphere_rotation_angle = 0
+
+        # Anima los planetas a diferentes velocidades
+        self.planet_angles[0] += 0.010 # Mercurio
+        self.planet_angles[1] += 0.007 # Venus
+        self.planet_angles[2] += 0.005 # Tierra
+        self.planet_angles[3] += 0.003 # Marte
+
+        # Anima el asteroide a lo largo de su ruta
+        self.asteroid_path_progress += 0.008
+        if self.asteroid_path_progress > 1.0:
+            self.asteroid_path_progress = 0.0 # Reinicia la animación
         
         self.update_visual_effects()
         with self.data_lock:
@@ -1023,22 +1036,25 @@ class SentinelApp:
         if len(points) > 1: pygame.draw.lines(self.screen, color, False, points, 1)
 
     def draw_neo_tracker_screen(self):
-        """Draws the NEO tracking screen with a pseudo-3D sphere and trajectory."""
-        self.screen.fill(COLOR_BLACK) # Fondo negro
-        
-        # Posición y tamaño de nuestra esfera
-        sphere_center_x = self.screen.get_width() // 2
-        sphere_center_y = self.screen.get_height() // 2 + 30
-        sphere_radius = 120
-
-        # Dibujar la esfera y su trayectoria
-        self.draw_vector_sphere(sphere_center_x, sphere_center_y, sphere_radius, self.current_theme_color)
-        
+        """
+        Draws the NEO tracker screen with a central sphere, top-left HUD,
+        and a bottom-right solar system mini-map.
+        """
+        # Obtiene los datos una vez para usarlos en todas las funciones
         neo_data = self.neo_tracker.get_closest_neo_data()
+        
+        # 1. Dibuja el elemento central: la esfera pseudo-3D y su trayectoria
+        sphere_center_x = self.screen.get_width() // 2
+        sphere_center_y = self.screen.get_height() // 2 + 20 # Un poco más arriba para no chocar con el mini-mapa
+        sphere_radius = 120
+        self.draw_vector_sphere(sphere_center_x, sphere_center_y, sphere_radius, self.current_theme_color)
         self.draw_asteroid_trajectory(sphere_center_x, sphere_center_y, sphere_radius, neo_data, self.current_theme_color)
         
-        # Dibujar la información de texto (HUD)
+        # 2. Dibuja la información de texto en la esquina superior izquierda
         self.draw_neo_hud(neo_data)
+        
+        # 3. Dibuja el nuevo mini-mapa en la esquina inferior derecha
+        self.draw_solar_system_map(neo_data)
     
     def draw_vector_sphere(self, x, y, radius, color):
         """Draws a rotating pseudo-3D wireframe sphere."""
@@ -1107,43 +1123,103 @@ class SentinelApp:
                 pygame.draw.line(self.screen, color + (alpha,), (x1, y1), (x2, y2), width)
     
     def draw_neo_hud(self, neo_data):
-        """Draws the text information for the NEO tracker screen."""
+        """Draws the text information for the NEO tracker screen in the top-left corner."""
+        margins = config.CONFIG['margins']
+        x_offset = margins['left'] + 10
+        y_offset = margins['top'] + 45 # Debajo del header
+
         title_surf = self.font_large.render("// DEEP SPACE THREAT ANALYSIS //", True, self.current_theme_color)
-        self.screen.blit(title_surf, title_surf.get_rect(centerx=self.screen.get_width()/2, y=45))
+        self.screen.blit(title_surf, (x_offset, y_offset))
+        y_offset += 30
 
         if not neo_data:
             status_surf = self.font_medium.render("...ACQUIRING TARGET DATA...", True, self.current_theme_color)
-            self.screen.blit(status_surf, status_surf.get_rect(centerx=self.screen.get_width()/2, y=100))
+            self.screen.blit(status_surf, (x_offset, y_offset))
             return
             
-        # Información a la izquierda
-        y_offset = 120
-        labels = ["ID:", "DIAMETER:", "VELOCITY:"]
-        values = [
+        # Usamos dos columnas para mantener el texto ordenado
+        col1_x = x_offset
+        col2_x = x_offset + 220 # Ajusta este valor si el texto no cabe
+        line_height = 20
+
+        # Columna 1
+        labels1 = ["ID:", "DIAMETER:", "VELOCITY:"]
+        values1 = [
             neo_data['name'], 
             f"~{neo_data['diameter_m']} METERS", 
             f"{neo_data['velocity_kmh']:,} KM/H"
         ]
-        for i, label in enumerate(labels):
-            label_surf = self.font_medium.render(label, True, self.current_theme_color)
-            value_surf = self.font_medium.render(values[i], True, COLOR_WHITE)
-            self.screen.blit(label_surf, (30, y_offset + i*50))
-            self.screen.blit(value_surf, (30, y_offset + 20 + i*50))
+        for i, label in enumerate(labels1):
+            label_surf = self.font_small.render(label, True, self.current_theme_color)
+            value_surf = self.font_medium.render(values1[i], True, COLOR_WHITE)
+            self.screen.blit(label_surf, (col1_x, y_offset + i * (line_height * 2)))
+            self.screen.blit(value_surf, (col1_x, y_offset + line_height + i * (line_height * 2)))
 
-        # Información a la derecha
-        labels_r = ["APPROACH:", "MISS DISTANCE:", "ASSESSMENT:"]
+        # Columna 2
+        labels2 = ["APPROACH:", "MISS DISTANCE:", "ASSESSMENT:"]
         is_haz_text = "!!! POTENTIAL HAZARD !!!" if neo_data['is_hazardous'] else "[ NOMINAL ]"
-        values_r = [
+        values2 = [
             neo_data['approach_date'].split(" ")[0], 
             f"{neo_data['miss_distance_km']:,} KM", 
             is_haz_text
         ]
         text_color = config.THEME_COLORS['danger'] if neo_data['is_hazardous'] else COLOR_WHITE
-        for i, label in enumerate(labels_r):
-            label_surf = self.font_medium.render(label, True, self.current_theme_color)
-            value_surf = self.font_medium.render(values_r[i], True, text_color if i == 2 else COLOR_WHITE)
-            self.screen.blit(label_surf, (self.screen.get_width() - 250, y_offset + i*50))
-            self.screen.blit(value_surf, (self.screen.get_width() - 250, y_offset + 20 + i*50))
+        for i, label in enumerate(labels2):
+            label_surf = self.font_small.render(label, True, self.current_theme_color)
+            value_surf = self.font_medium.render(values2[i], True, text_color if i == 2 else COLOR_WHITE)
+            self.screen.blit(label_surf, (col2_x, y_offset + i * (line_height * 2)))
+            self.screen.blit(value_surf, (col2_x, y_offset + line_height + i * (line_height * 2)))
+    
+    def draw_solar_system_map(self, neo_data):
+        """Draws a SMALL, schematic solar system map in the bottom-right corner."""
+        # Define el área para nuestro "mini-mapa"
+        map_rect = pygame.Rect(400, 280, 220, 180) # Posición y tamaño en la esquina inferior derecha
+        center_x, center_y = map_rect.centerx, map_rect.centery
+        max_radius = map_rect.width // 2 - 10 # El radio máximo es ahora mucho más pequeño
+
+        # Dibuja un recuadro para el mini-mapa
+        pygame.draw.rect(self.screen, self.current_theme_color, map_rect, 1)
+        map_title_surf = self.font_small.render("SYSTEM NAV-MAP", True, self.current_theme_color)
+        self.screen.blit(map_title_surf, (map_rect.x + 5, map_rect.y + 2))
+        
+        # Dibuja el Sol
+        pygame.draw.circle(self.screen, COLOR_YELLOW, (center_x, center_y), 5)
+
+        # Dibuja órbitas y planetas (escalados al nuevo tamaño)
+        orbit_radii = [max_radius * 0.3, max_radius * 0.5, max_radius * 0.75, max_radius * 0.95]
+        planet_colors = [(165, 42, 42), (210, 180, 140), (0, 120, 255), (255, 69, 0)]
+        for i, radius in enumerate(orbit_radii):
+            pygame.draw.circle(self.screen, self.current_theme_color + (40,), (center_x, center_y), int(radius), 1)
+            planet_x = center_x + radius * math.cos(self.planet_angles[i])
+            planet_y = center_y + radius * math.sin(self.planet_angles[i])
+            pygame.draw.circle(self.screen, planet_colors[i], (int(planet_x), int(planet_y)), 2)
+
+        # Dibuja la trayectoria del asteroide (recalculada para el mini-mapa)
+        if not neo_data:
+            return
+
+        miss_dist_km = neo_data.get('miss_distance_km', 5000000)
+        closeness_factor = np.clip(1.0 - (miss_dist_km / 10000000), 0.1, 0.9)
+        earth_orbit_radius = orbit_radii[2]
+
+        # Puntos de la curva relativos al nuevo mapa
+        p0 = (map_rect.left, map_rect.top + 20)
+        p1 = (center_x + earth_orbit_radius * closeness_factor, center_y + 10)
+        p2 = (map_rect.right - 10, map_rect.bottom)
+        
+        path_points = []
+        for t_step in np.linspace(0, 1, 30): # Menos segmentos para un mapa más pequeño
+            x = (1 - t_step)**2 * p0[0] + 2 * (1 - t_step) * t_step * p1[0] + t_step**2 * p2[0]
+            y = (1 - t_step)**2 * p0[1] + 2 * (1 - t_step) * t_step * p1[1] + t_step**2 * p2[1]
+            path_points.append((x, y))
+        pygame.draw.lines(self.screen, self.current_theme_color + (80,), False, path_points, 1)
+
+        t = self.asteroid_path_progress
+        ast_x = (1 - t)**2 * p0[0] + 2 * (1 - t) * t * p1[0] + t**2 * p2[0]
+        ast_y = (1 - t)**2 * p0[1] + 2 * (1 - t) * t * p1[1] + t**2 * p2[1]
+        
+        ast_color = config.THEME_COLORS['danger'] if neo_data['is_hazardous'] else COLOR_YELLOW
+        pygame.draw.circle(self.screen, ast_color, (int(ast_x), int(ast_y)), 2) # Un simple círculo para el asteroide
 
 if __name__ == '__main__':
     app = SentinelApp()
