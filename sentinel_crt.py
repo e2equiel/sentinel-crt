@@ -16,6 +16,8 @@ import math
 # Import configuration from the separate config file
 import config
 
+from neo_tracker import NEOTracker
+
 # --- Constants ---
 # Colors are defined in the config file now for easier theme management.
 # We can keep them here if they are static, but moving them to config.py is also an option.
@@ -149,6 +151,13 @@ class SentinelApp:
         self.level_bars_heights = [random.randint(2, 18) for _ in range(5)]; self.level_bars_update_timer = 0
         self.pattern_phase = 0.0
         self.pattern_speed_px_s = 10.0
+
+        self.neo_tracker = NEOTracker(config.CONFIG["nasa_api_key"])
+        self.neo_tracker.start_periodic_fetch(interval_hours=6)
+        self.idle_screen_list = ["camera", "neo_tracker"]
+        self.current_idle_index = 0
+        self.idle_screen_timer = 0
+        self.sphere_rotation_angle = 0
         
         self.calculate_layout()
         
@@ -505,24 +514,44 @@ class SentinelApp:
     def update(self):
         if self.reset_pending:
             self._execute_hard_reset()
-            self.reset_pending = False # Reset the flag after execution
-            return # Skip the rest of the update cycle for this frame
-        
+            self.reset_pending = False
+            return
+
+        now = time.time()
         self.update_detections()
         self.update_alert_level()
-        
+
+        # --- INICIO DE LA NUEVA LÓGICA DE PRIORIDAD DE PANTALLAS ---
+        with self.data_lock:
+            # Prioridad 1: Alerta Activa
+            if self.alert_level != "none":
+                self.current_screen = "camera"
+                # Reseteamos el temporizador del ciclo para que no cambie de pantalla
+                self.idle_screen_timer = now + config.CONFIG.get("idle_screen_time", 20)
+
+            # Prioridad 2: Tráfico Aéreo
+            elif self.active_flights:
+                self.current_screen = "radar"
+                # También reseteamos el temporizador
+                self.idle_screen_timer = now + config.CONFIG.get("idle_screen_time", 20)
+            
+            # Prioridad 3: Ciclo Pasivo (No hay alertas ni vuelos)
+            else:
+                if now > self.idle_screen_timer:
+                    # Avanza a la siguiente pantalla en la lista de inactividad
+                    self.current_idle_index = (self.current_idle_index + 1) % len(self.idle_screen_list)
+                    self.current_screen = self.idle_screen_list[self.current_idle_index]
+                    # Establece el temporizador para el próximo cambio
+                    self.idle_screen_timer = now + config.CONFIG.get("idle_screen_time", 20)
+        # --- FIN DE LA NUEVA LÓGICA ---
+
         if self.current_screen == "camera":
             self.update_zoom_priority()
             self.update_zoom()
-        
-        # Screen switching logic with alert priority
-        if config.CONFIG["startup_screen"] == "auto":
-            if self.alert_level != "none":
-                self.current_screen = "camera"
-            elif self.active_flights:
-                self.current_screen = "radar"
-            elif self.current_screen == "radar" and time.time() > self.flight_screen_timer:
-                self.current_screen = "camera"
+
+        self.sphere_rotation_angle += 0.005
+        if self.sphere_rotation_angle > math.pi * 2:
+            self.sphere_rotation_angle = 0
         
         self.update_visual_effects()
         with self.data_lock:
@@ -643,11 +672,18 @@ class SentinelApp:
 
     def draw(self):
         self.screen.fill(COLOR_BLACK)
-        if config.CONFIG['show_header']:
-            self.draw_header()
-        
+
+        # Dibuja el contenido de la pantalla actual
         if self.current_screen == "camera": self.draw_camera_view()
         elif self.current_screen == "radar": self.draw_radar_view()
+        elif self.current_screen == "neo_tracker": self.draw_neo_tracker_screen()
+        # elif self.current_screen == "ha_status": self.draw_ha_status_screen()
+        else: self.draw_camera_view()
+
+        # Dibuja el header encima de todo, si está habilitado
+        if config.CONFIG['show_header']:
+            self.draw_header()
+
         pygame.display.flip()
 
     def draw_camera_view(self):
@@ -985,6 +1021,129 @@ class SentinelApp:
         with self.data_lock:
             for i, y in enumerate(self.graph_data): points.append((graph_rect.x + i, graph_rect.y + y))
         if len(points) > 1: pygame.draw.lines(self.screen, color, False, points, 1)
+
+    def draw_neo_tracker_screen(self):
+        """Draws the NEO tracking screen with a pseudo-3D sphere and trajectory."""
+        self.screen.fill(COLOR_BLACK) # Fondo negro
+        
+        # Posición y tamaño de nuestra esfera
+        sphere_center_x = self.screen.get_width() // 2
+        sphere_center_y = self.screen.get_height() // 2 + 30
+        sphere_radius = 120
+
+        # Dibujar la esfera y su trayectoria
+        self.draw_vector_sphere(sphere_center_x, sphere_center_y, sphere_radius, self.current_theme_color)
+        
+        neo_data = self.neo_tracker.get_closest_neo_data()
+        self.draw_asteroid_trajectory(sphere_center_x, sphere_center_y, sphere_radius, neo_data, self.current_theme_color)
+        
+        # Dibujar la información de texto (HUD)
+        self.draw_neo_hud(neo_data)
+    
+    def draw_vector_sphere(self, x, y, radius, color):
+        """Draws a rotating pseudo-3D wireframe sphere."""
+        # Dibuja las líneas de longitud (elipses verticales)
+        num_long_lines = 12
+        for i in range(num_long_lines):
+            angle = (i / num_long_lines) * math.pi + self.sphere_rotation_angle
+            
+            # El coseno hace que las elipses se achaten en los bordes, simulando una esfera
+            ellipse_width = abs(int(radius * 2 * math.cos(angle)))
+            
+            if ellipse_width > 2: # Solo dibuja las que son visibles
+                rect = pygame.Rect(x - ellipse_width // 2, y - radius, ellipse_width, radius * 2)
+                pygame.draw.ellipse(self.screen, color, rect, 1)
+
+        # Dibuja las líneas de latitud (elipses horizontales)
+        num_lat_lines = 7
+        for i in range(1, num_lat_lines):
+            lat_y = y - radius + (i * (radius * 2) / num_lat_lines)
+            
+            # El cálculo de la anchura simula la curvatura de la esfera
+            dist_from_center = abs(y - lat_y)
+            width_factor = math.sqrt(radius**2 - dist_from_center**2) / radius
+            ellipse_width = int(radius * 2 * width_factor)
+            
+            rect = pygame.Rect(x - ellipse_width // 2, lat_y - 2, ellipse_width, 4)
+            pygame.draw.ellipse(self.screen, color, rect, 1)
+    
+    def draw_asteroid_trajectory(self, cx, cy, radius, neo_data, color):
+        """Draws a pseudo-3D trajectory line for the NEO."""
+        if not neo_data:
+            return
+
+        # Simula una trayectoria simple de izquierda a derecha
+        start_x, end_x = cx - radius * 2.5, cx + radius * 2.5
+        
+        # La altura de la trayectoria depende de la distancia de aproximación
+        # Normalizamos la distancia para que siempre se vea bien
+        miss_dist_km = neo_data.get('miss_distance_km', 1000000)
+        # Un valor más bajo significa que pasa más cerca. Lo escalamos para la pantalla.
+        pass_height = min(1.0, miss_dist_km / 5000000) * radius * 1.5
+        start_y, end_y = cy - radius, cy + pass_height
+
+        num_segments = 50
+        for i in range(num_segments):
+            # Interpola la posición del segmento
+            t = i / (num_segments - 1)
+            x1 = start_x + (end_x - start_x) * (i / num_segments)
+            y1 = start_y + (end_y - start_y) * (i / num_segments)
+            x2 = start_x + (end_x - start_x) * ((i + 1) / num_segments)
+            y2 = start_y + (end_y - start_y) * ((i + 1) / num_segments)
+
+            # --- El truco del Pseudo-3D ---
+            # Simula una coordenada Z: negativo detrás de la esfera, positivo delante
+            z = (x1 - cx) / (radius * 1.5) 
+            
+            is_behind = z**2 + ((y1 - cy)/radius)**2 < 1.1 # ¿Está el punto "detrás" del planeta?
+
+            if is_behind:
+                # Si está detrás, dibuja una línea punteada y más oscura
+                draw_dashed_line(self.screen, color + (100,), (x1, y1), (x2, y2), 1, 4)
+            else:
+                # Si está delante, el grosor y brillo dependen de Z
+                alpha = int(np.clip(100 + z * 155, 100, 255))
+                width = int(np.clip(1 + z * 2, 1, 3))
+                pygame.draw.line(self.screen, color + (alpha,), (x1, y1), (x2, y2), width)
+    
+    def draw_neo_hud(self, neo_data):
+        """Draws the text information for the NEO tracker screen."""
+        title_surf = self.font_large.render("// DEEP SPACE THREAT ANALYSIS //", True, self.current_theme_color)
+        self.screen.blit(title_surf, title_surf.get_rect(centerx=self.screen.get_width()/2, y=45))
+
+        if not neo_data:
+            status_surf = self.font_medium.render("...ACQUIRING TARGET DATA...", True, self.current_theme_color)
+            self.screen.blit(status_surf, status_surf.get_rect(centerx=self.screen.get_width()/2, y=100))
+            return
+            
+        # Información a la izquierda
+        y_offset = 120
+        labels = ["ID:", "DIAMETER:", "VELOCITY:"]
+        values = [
+            neo_data['name'], 
+            f"~{neo_data['diameter_m']} METERS", 
+            f"{neo_data['velocity_kmh']:,} KM/H"
+        ]
+        for i, label in enumerate(labels):
+            label_surf = self.font_medium.render(label, True, self.current_theme_color)
+            value_surf = self.font_medium.render(values[i], True, COLOR_WHITE)
+            self.screen.blit(label_surf, (30, y_offset + i*50))
+            self.screen.blit(value_surf, (30, y_offset + 20 + i*50))
+
+        # Información a la derecha
+        labels_r = ["APPROACH:", "MISS DISTANCE:", "ASSESSMENT:"]
+        is_haz_text = "!!! POTENTIAL HAZARD !!!" if neo_data['is_hazardous'] else "[ NOMINAL ]"
+        values_r = [
+            neo_data['approach_date'].split(" ")[0], 
+            f"{neo_data['miss_distance_km']:,} KM", 
+            is_haz_text
+        ]
+        text_color = config.THEME_COLORS['danger'] if neo_data['is_hazardous'] else COLOR_WHITE
+        for i, label in enumerate(labels_r):
+            label_surf = self.font_medium.render(label, True, self.current_theme_color)
+            value_surf = self.font_medium.render(values_r[i], True, text_color if i == 2 else COLOR_WHITE)
+            self.screen.blit(label_surf, (self.screen.get_width() - 250, y_offset + i*50))
+            self.screen.blit(value_surf, (self.screen.get_width() - 250, y_offset + 20 + i*50))
 
 if __name__ == '__main__':
     app = SentinelApp()
