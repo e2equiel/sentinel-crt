@@ -1123,7 +1123,7 @@ class SentinelApp:
                 pygame.draw.line(self.screen, color + (alpha,), (x1, y1), (x2, y2), width)
     
     def draw_neo_hud(self, neo_data):
-        """Draws the text information for the NEO tracker screen in the top-left corner."""
+        """Draws the text information for the NEO tracker screen in a single top-left column."""
         margins = config.CONFIG['margins']
         x_offset = margins['left'] + 10
         y_offset = margins['top'] + 45 # Debajo del header
@@ -1137,38 +1137,31 @@ class SentinelApp:
             self.screen.blit(status_surf, (x_offset, y_offset))
             return
             
-        # Usamos dos columnas para mantener el texto ordenado
-        col1_x = x_offset
-        col2_x = x_offset + 220 # Ajusta este valor si el texto no cabe
-        line_height = 20
+        line_height = 18 # Un poco más compacto para que entre todo
 
-        # Columna 1
-        labels1 = ["ID:", "DIAMETER:", "VELOCITY:"]
-        values1 = [
-            neo_data['name'], 
-            f"~{neo_data['diameter_m']} METERS", 
-            f"{neo_data['velocity_kmh']:,} KM/H"
-        ]
-        for i, label in enumerate(labels1):
-            label_surf = self.font_small.render(label, True, self.current_theme_color)
-            value_surf = self.font_medium.render(values1[i], True, COLOR_WHITE)
-            self.screen.blit(label_surf, (col1_x, y_offset + i * (line_height * 2)))
-            self.screen.blit(value_surf, (col1_x, y_offset + line_height + i * (line_height * 2)))
+        # --- Lógica de una sola columna ---
+        is_hazardous = neo_data['is_hazardous']
+        assessment_text = "!!! POTENTIAL HAZARD !!!" if is_hazardous else "[ NOMINAL ]"
+        assessment_color = config.THEME_COLORS['danger'] if is_hazardous else COLOR_WHITE
 
-        # Columna 2
-        labels2 = ["APPROACH:", "MISS DISTANCE:", "ASSESSMENT:"]
-        is_haz_text = "!!! POTENTIAL HAZARD !!!" if neo_data['is_hazardous'] else "[ NOMINAL ]"
-        values2 = [
-            neo_data['approach_date'].split(" ")[0], 
-            f"{neo_data['miss_distance_km']:,} KM", 
-            is_haz_text
+        # Combinamos toda la info en una sola lista de tuplas (etiqueta, valor, color_valor)
+        info_lines = [
+            ("ID:", neo_data['name'], COLOR_WHITE),
+            ("DIAMETER:", f"~{neo_data['diameter_m']} METERS", COLOR_WHITE),
+            ("VELOCITY:", f"{neo_data['velocity_kmh']:,} KM/H", COLOR_WHITE),
+            ("APPROACH:", neo_data['approach_date'].split(" ")[0], COLOR_WHITE),
+            ("MISS DISTANCE:", f"{neo_data['miss_distance_km']:,} KM", COLOR_WHITE),
+            ("ASSESSMENT:", assessment_text, assessment_color)
         ]
-        text_color = config.THEME_COLORS['danger'] if neo_data['is_hazardous'] else COLOR_WHITE
-        for i, label in enumerate(labels2):
+
+        for label, value, value_color in info_lines:
             label_surf = self.font_small.render(label, True, self.current_theme_color)
-            value_surf = self.font_medium.render(values2[i], True, text_color if i == 2 else COLOR_WHITE)
-            self.screen.blit(label_surf, (col2_x, y_offset + i * (line_height * 2)))
-            self.screen.blit(value_surf, (col2_x, y_offset + line_height + i * (line_height * 2)))
+            value_surf = self.font_medium.render(value, True, value_color)
+            
+            self.screen.blit(label_surf, (x_offset, y_offset))
+            y_offset += line_height
+            self.screen.blit(value_surf, (x_offset, y_offset))
+            y_offset += line_height * 1.5 # Espacio extra entre pares de datos
     
     def draw_solar_system_map(self, neo_data):
         """Draws a SMALL, schematic solar system map in the bottom-right corner."""
