@@ -17,6 +17,7 @@ import math
 import config
 
 from neo_tracker import NEOTracker
+from eonet_tracker import EONETTracker
 
 # --- Constants ---
 # Colors are defined in the config file now for easier theme management.
@@ -24,7 +25,9 @@ from neo_tracker import NEOTracker
 COLOR_BLACK = (0, 0, 0)
 COLOR_WHITE = (220, 220, 220) 
 COLOR_YELLOW = (255, 255, 0)
-COLOR_RING = (0, 255, 65, 70) 
+COLOR_RING = (0, 255, 65, 70)
+
+
 
 # --- Helper Functions ---
 def calculate_zoom_from_radius(radius_m, map_width_px, latitude):
@@ -152,12 +155,21 @@ class SentinelApp:
         self.pattern_phase = 0.0
         self.pattern_speed_px_s = 10.0
 
+        # NASA APIs
         self.neo_tracker = NEOTracker(config.CONFIG["nasa_api_key"])
         self.neo_tracker.start_periodic_fetch(interval_hours=6)
-        self.idle_screen_list = ["camera", "neo_tracker"]
+        
+        self.eonet_tracker = EONETTracker()
+        self.eonet_tracker.start_periodic_fetch(interval_hours=1)
+
+        # Screen Cycling
+        self.idle_screen_list = config.CONFIG.get("idle_screen_list", ["camera", "neo_tracker"])
         self.current_idle_index = 0
         self.idle_screen_timer = 0
+        
+        # NEO & Globe Screen state
         self.sphere_rotation_angle = 0
+        self.globe_rotation_angle = 0 # For EONET
         self.planet_angles = [random.uniform(0, 2 * math.pi) for _ in range(4)] # Ángulos iniciales para 4 planetas
         self.asteroid_path_progress = 0.0
         
@@ -554,6 +566,10 @@ class SentinelApp:
         self.sphere_rotation_angle += 0.005
         if self.sphere_rotation_angle > math.pi * 2:
             self.sphere_rotation_angle = 0
+            
+        self.globe_rotation_angle += 0.008 # Slower rotation for the globe
+        if self.globe_rotation_angle > math.pi * 2:
+            self.globe_rotation_angle = 0
 
         # Anima los planetas a diferentes velocidades
         self.planet_angles[0] += 0.010 # Mercurio
@@ -690,6 +706,7 @@ class SentinelApp:
         if self.current_screen == "camera": self.draw_camera_view()
         elif self.current_screen == "radar": self.draw_radar_view()
         elif self.current_screen == "neo_tracker": self.draw_neo_tracker_screen()
+        elif self.current_screen == "eonet_globe": self.draw_eonet_globe_screen()
         # elif self.current_screen == "ha_status": self.draw_ha_status_screen()
         else: self.draw_camera_view()
 
@@ -839,20 +856,34 @@ class SentinelApp:
         self.screen.blit(panel_surface, self.map_area_rect.topleft)
         
         if config.CONFIG.get("map_radial_lines", False):
+            # --- CORRECCIÓN PARA EL ORDEN DEL RADAR ---
             cardinal_points = {"N": 0, "NE": 45, "E": 90, "SE": 135, "S": 180, "SW": 225, "W": 270, "NW": 315}
             intermediate_points = {"NNE": 22.5, "ENE": 67.5, "ESE": 112.5, "SSE": 157.5, "SSW": 202.5, "WSW": 247.5, "WNW": 292.5, "NNW": 337.5}
+            
+            # Unimos y ordenamos los puntos por su ángulo para asegurar el orden de dibujo
+            all_points_sorted = sorted((cardinal_points | intermediate_points).items(), key=lambda item: item[1])
+            cardinal_points_sorted = sorted(cardinal_points.items(), key=lambda item: item[1])
+            intermediate_points_sorted = sorted(intermediate_points.items(), key=lambda item: item[1])
+
             line_start_radius = 20
             start_radius_inter = max_radius_px - (radius_step_m * pixels_per_meter)
             
-            # Draw SECTOR lines (at main cardinal points)
-            for angle in cardinal_points.values():
-                line_angle_rad = math.radians(angle - 90 - 22.5) # Offset to be sector boundaries
+            # Dibujar las líneas de los sectores (hasta el penúltimo anillo)
+            for _, angle in cardinal_points_sorted:
+                line_angle_rad = math.radians(angle - 90 - 22.5)
                 start_x, start_y = home_pos[0] + line_start_radius * math.cos(line_angle_rad), home_pos[1] + line_start_radius * math.sin(line_angle_rad)
                 end_x, end_y = home_pos[0] + start_radius_inter * math.cos(line_angle_rad), home_pos[1] + start_radius_inter * math.sin(line_angle_rad)
                 pygame.draw.line(self.screen, COLOR_RING, (start_x, start_y), (end_x, end_y), 1)
 
-            # Draw LABELS in the CENTER of the sectors (at cardinal points)
-            for label, angle in cardinal_points.items():
+            # Dibujar las líneas exteriores (desde el penúltimo al último anillo)
+            for _, angle in all_points_sorted:
+                line_angle_rad = math.radians(angle - 90 - 11.25)
+                start_x, start_y = home_pos[0] + start_radius_inter * math.cos(line_angle_rad), home_pos[1] + start_radius_inter * math.sin(line_angle_rad)
+                end_x, end_y = home_pos[0] + max_radius_px * math.cos(line_angle_rad), home_pos[1] + max_radius_px * math.sin(line_angle_rad)
+                pygame.draw.line(self.screen, COLOR_RING, (start_x, start_y), (end_x, end_y), 1)
+
+            # Dibujar las etiquetas de texto
+            for label, angle in cardinal_points_sorted:
                 label_angle_rad = math.radians(angle - 90)
                 label_surf = self.font_small.render(label, True, COLOR_RING)
                 label_pos = (home_pos[0] + (max_radius_px + 15) * math.cos(label_angle_rad), home_pos[1] + (max_radius_px + 15) * math.sin(label_angle_rad))
@@ -860,17 +891,10 @@ class SentinelApp:
                 label_rect.clamp_ip(self.visible_map_rect) 
                 self.screen.blit(label_surf, label_rect)
             
-            # Draw intermediate lines and labels
-            for label, angle in (intermediate_points | cardinal_points).items():
-                line_angle_rad = math.radians(angle - 90 - 11.25)
-                start_x, start_y = home_pos[0] + start_radius_inter * math.cos(line_angle_rad), home_pos[1] + start_radius_inter * math.sin(line_angle_rad)
-                end_x, end_y = home_pos[0] + max_radius_px * math.cos(line_angle_rad), home_pos[1] + max_radius_px * math.sin(line_angle_rad)
-                pygame.draw.line(self.screen, COLOR_RING, (start_x, start_y), (end_x, end_y), 1)
-                
-            for label, angle in intermediate_points.items():
-                line_angle_rad = math.radians(angle - 90)
+            for label, angle in intermediate_points_sorted:
+                label_angle_rad = math.radians(angle - 90)
                 label_surf = self.font_tiny.render(label, True, COLOR_RING)
-                label_pos = (home_pos[0] + (max_radius_px + 15) * math.cos(line_angle_rad), home_pos[1] + (max_radius_px + 15) * math.sin(line_angle_rad))
+                label_pos = (home_pos[0] + (max_radius_px + 15) * math.cos(label_angle_rad), home_pos[1] + (max_radius_px + 15) * math.sin(label_angle_rad))
                 label_rect = label_surf.get_rect(center=label_pos)
                 label_rect.clamp_ip(self.visible_map_rect)
                 self.screen.blit(label_surf, label_rect)
@@ -1047,7 +1071,7 @@ class SentinelApp:
         sphere_center_x = self.screen.get_width() // 2
         sphere_center_y = self.screen.get_height() // 2 + 20 # Un poco más arriba para no chocar con el mini-mapa
         sphere_radius = 120
-        self.draw_vector_sphere(sphere_center_x, sphere_center_y, sphere_radius, self.current_theme_color)
+        self.draw_vector_sphere(sphere_center_x, sphere_center_y, sphere_radius, self.current_theme_color, self.sphere_rotation_angle)
         self.draw_asteroid_trajectory(sphere_center_x, sphere_center_y, sphere_radius, neo_data, self.current_theme_color)
         
         # 2. Dibuja la información de texto en la esquina superior izquierda
@@ -1056,12 +1080,12 @@ class SentinelApp:
         # 3. Dibuja el nuevo mini-mapa en la esquina inferior derecha
         self.draw_solar_system_map(neo_data)
     
-    def draw_vector_sphere(self, x, y, radius, color):
+    def draw_vector_sphere(self, x, y, radius, color, rotation_angle):
         """Draws a rotating pseudo-3D wireframe sphere."""
         # Dibuja las líneas de longitud (elipses verticales)
         num_long_lines = 12
         for i in range(num_long_lines):
-            angle = (i / num_long_lines) * math.pi + self.sphere_rotation_angle
+            angle = (i / num_long_lines) * math.pi + rotation_angle
             
             # El coseno hace que las elipses se achaten en los bordes, simulando una esfera
             ellipse_width = abs(int(radius * 2 * math.cos(angle)))
@@ -1082,7 +1106,141 @@ class SentinelApp:
             
             rect = pygame.Rect(x - ellipse_width // 2, lat_y - 2, ellipse_width, 4)
             pygame.draw.ellipse(self.screen, color, rect, 1)
-    
+
+    # ==============================================================================
+    # == NUEVAS FUNCIONES Y MODIFICACIONES PARA EONET
+    # ==============================================================================
+
+    def draw_eonet_globe_screen(self):
+        """Dibuja el globo de EONET con etiquetas proyectadas radialmente."""
+        color = self.current_theme_color
+        
+        globe_center_x = self.screen.get_width() * 0.6
+        globe_center_y = self.screen.get_height() / 2 + 20
+        globe_radius = 160
+        events = self.eonet_tracker.get_events()
+
+        # Primero dibujamos el globo para que las líneas salgan de su superficie
+        self.draw_vector_sphere(globe_center_x, globe_center_y, globe_radius, color, self.globe_rotation_angle)
+        
+        if events:
+            # Bucle principal para calcular posiciones y dibujar todo
+            for i, event in enumerate(events, 1):
+                # Omitir eventos si no tienen coordenadas válidas
+                if not event['coordinates'] or len(event['coordinates']) != 2:
+                    continue
+
+                lon, lat = event['coordinates']
+                lat_rad = math.radians(lat)
+                lon_rad = math.radians(lon) + self.globe_rotation_angle
+                
+                x3d = math.cos(lat_rad) * math.cos(lon_rad)
+                y3d = math.sin(lat_rad)
+                z3d = math.cos(lat_rad) * math.sin(lon_rad)
+                
+                # Procesar solo los puntos en la cara visible del globo
+                if z3d > -0.1:
+                    # 1. Calcular la posición del punto en la pantalla
+                    screen_x = int(globe_center_x + globe_radius * x3d)
+                    screen_y = int(globe_center_y - globe_radius * y3d)
+                    
+                    # 2. Calcular el vector de proyección desde el centro del globo
+                    dx = screen_x - globe_center_x
+                    dy = screen_y - globe_center_y
+                    dist = math.hypot(dx, dy)
+                    if dist == 0: continue # Evitar división por cero
+
+                    # 3. Encontrar el punto final de la línea proyectada
+                    projection_dist = 40  # Distancia en píxeles para proyectar la etiqueta
+                    end_line_x = screen_x + (dx / dist) * projection_dist
+                    end_line_y = screen_y + (dy / dist) * projection_dist
+
+                    # 4. Dibujar la etiqueta en el punto final
+                    tag_topleft = self.get_hud_tag_topleft((end_line_x, end_line_y), str(i))
+                    self.draw_hud_tag(self.screen, tag_topleft, str(i), color)
+
+                    # 5. Dibujar la línea desde el punto en el globo hasta el inicio de la etiqueta
+                    draw_dashed_line(self.screen, color, (screen_x, screen_y), (end_line_x, end_line_y))
+                    
+                    # 6. Dibujar el marcador del evento (al final, para que esté por encima de la línea)
+                    alpha = int(100 + 155 * (z3d if z3d > 0 else 0))
+                    pygame.draw.circle(self.screen, COLOR_YELLOW + (alpha,), (screen_x, screen_y), 4)
+
+        # Finalmente, dibujar el HUD de texto a la izquierda
+        self.draw_eonet_hud(events)
+
+    def get_hud_tag_topleft(self, center_pos, text):
+        """Calcula la posición topleft de una etiqueta para que quede centrada en center_pos."""
+        text_surf = self.font_tiny.render(text, True, COLOR_WHITE)
+        padding = 4
+        tag_width = text_surf.get_width() + padding * 2
+        tag_height = text_surf.get_height() + padding * 2
+        return (center_pos[0] - tag_width / 2, center_pos[1] - tag_height / 2)
+
+    def draw_hud_tag(self, surface, topleft_pos, text, color):
+        """Dibuja una etiqueta numerada en una posición absoluta y devuelve su Rect."""
+        text_surf = self.font_tiny.render(text, True, COLOR_WHITE)
+        padding = 4
+        bg_rect = pygame.Rect(
+            topleft_pos[0], 
+            topleft_pos[1],
+            text_surf.get_width() + padding * 2,
+            text_surf.get_height() + padding * 2
+        )
+        bg_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
+        bg_surf.fill((0, 0, 0, 180))
+        surface.blit(bg_surf, bg_rect.topleft)
+        pygame.draw.rect(surface, color, bg_rect, 1)
+        surface.blit(text_surf, text_surf.get_rect(center=bg_rect.center).topleft)
+        return bg_rect
+
+    def draw_eonet_hud(self, events):
+        """Dibuja el HUD de texto para la pantalla de EONET."""
+        margins = config.CONFIG['margins']
+        x_offset = margins['left'] + 10
+        y_offset = margins['top'] + 45
+
+        title_surf = self.font_large.render("// GLOBAL EVENT MONITOR //", True, self.current_theme_color)
+        self.screen.blit(title_surf, (x_offset, y_offset))
+        y_offset += 30
+
+        if not events:
+            status_surf = self.font_medium.render("...SCANNING FOR GLOBAL EVENTS...", True, self.current_theme_color)
+            self.screen.blit(status_surf, (x_offset, y_offset))
+            return
+        
+        max_events_to_show = 8
+        line_height = 20
+        
+        for i, event in enumerate(events[:max_events_to_show], 1):
+            number_box_size = 22
+            box_rect = pygame.Rect(x_offset, y_offset, number_box_size, number_box_size)
+            pygame.draw.rect(self.screen, self.current_theme_color, box_rect, 1)
+            
+            num_surf = self.font_small.render(str(i), True, COLOR_WHITE)
+            self.screen.blit(num_surf, num_surf.get_rect(center=box_rect.center).topleft)
+            
+            text_x_offset = x_offset + number_box_size + 8
+
+            category_color = config.THEME_COLORS['warning'] if event['category'] in ['Wildfires', 'Severe Storms'] else COLOR_WHITE
+            
+            cat_surf = self.font_small.render(f"[{event['category'].upper()}]", True, category_color)
+            self.screen.blit(cat_surf, (text_x_offset, y_offset))
+            
+            title_text = event['title']
+            if len(title_text) > 35:
+                title_text = title_text[:32] + "..."
+            title_surf = self.font_medium.render(title_text, True, COLOR_WHITE)
+            self.screen.blit(title_surf, (text_x_offset, y_offset + line_height))
+
+            y_offset += line_height * 2.5
+            if y_offset > self.screen.get_height() - 50:
+                break
+
+    # ==============================================================================
+    # == FIN DE LAS MODIFICACIONES
+    # ==============================================================================
+
     def draw_asteroid_trajectory(self, cx, cy, radius, neo_data, color):
         """Draws a pseudo-3D trajectory line for the NEO."""
         if not neo_data:
