@@ -18,6 +18,7 @@ import config
 
 from neo_tracker import NEOTracker
 from eonet_tracker import EONETTracker
+from ascii_globe import ASCIIGlobe # <-- AÑADIDO
 
 # --- Constants ---
 # Colors are defined in the config file now for easier theme management.
@@ -172,6 +173,19 @@ class SentinelApp:
         self.globe_rotation_angle = 0 # For EONET
         self.planet_angles = [random.uniform(0, 2 * math.pi) for _ in range(4)] # Ángulos iniciales para 4 planetas
         self.asteroid_path_progress = 0.0
+
+        # <-- AÑADIDO: INICIALIZACIÓN DEL GLOBO ASCII -->
+        self.globe_center_x = self.screen.get_width() * 0.6
+        self.globe_center_y = self.screen.get_height() / 2 + 20
+        self.globe_radius = 160
+        self.ascii_globe = ASCIIGlobe(
+            self.screen.get_width(),
+            self.screen.get_height(),
+            self.globe_radius,
+            (self.globe_center_x, self.globe_center_y),
+            'earth_W140_H35.txt'
+        )
+        # <-- FIN DEL CÓDIGO AÑADIDO -->
         
         self.calculate_layout()
         
@@ -570,6 +584,9 @@ class SentinelApp:
         self.globe_rotation_angle += 0.008 # Slower rotation for the globe
         if self.globe_rotation_angle > math.pi * 2:
             self.globe_rotation_angle = 0
+
+        # <-- AÑADIDO: ACTUALIZACIÓN DEL GLOBO ASCII -->
+        self.ascii_globe.update(angle_x=0.0, angle_y=self.globe_rotation_angle)
 
         # Anima los planetas a diferentes velocidades
         self.planet_angles[0] += 0.010 # Mercurio
@@ -1115,58 +1132,51 @@ class SentinelApp:
         """Dibuja el globo de EONET con etiquetas proyectadas radialmente."""
         color = self.current_theme_color
         
-        globe_center_x = self.screen.get_width() * 0.6
-        globe_center_y = self.screen.get_height() / 2 + 20
-        globe_radius = 160
+        globe_center_x = self.globe_center_x
+        globe_center_y = self.globe_center_y
+        globe_radius = self.globe_radius
         events = self.eonet_tracker.get_events()
 
-        # Primero dibujamos el globo para que las líneas salgan de su superficie
-        self.draw_vector_sphere(globe_center_x, globe_center_y, globe_radius, color, self.globe_rotation_angle)
+        self.ascii_globe.draw(self.screen, self.font_tiny, color)
         
         if events:
-            # Bucle principal para calcular posiciones y dibujar todo
             for i, event in enumerate(events, 1):
-                # Omitir eventos si no tienen coordenadas válidas
                 if not event['coordinates'] or len(event['coordinates']) != 2:
                     continue
 
                 lon, lat = event['coordinates']
-                lat_rad = math.radians(lat)
+
+                # <-- CORRECCIÓN: Revertimos la rotación a '+' para que coincida con el nuevo eje Z
                 lon_rad = math.radians(lon) + self.globe_rotation_angle
+                
+                lat_rad = math.radians(lat)
                 
                 x3d = math.cos(lat_rad) * math.cos(lon_rad)
                 y3d = math.sin(lat_rad)
-                z3d = math.cos(lat_rad) * math.sin(lon_rad)
+                # <-- CORRECCIÓN: Negamos Z aquí también para sincronizarlo con el globo
+                z3d = -math.cos(lat_rad) * math.sin(lon_rad)
                 
-                # Procesar solo los puntos en la cara visible del globo
                 if z3d > -0.1:
-                    # 1. Calcular la posición del punto en la pantalla
                     screen_x = int(globe_center_x + globe_radius * x3d)
                     screen_y = int(globe_center_y - globe_radius * y3d)
                     
-                    # 2. Calcular el vector de proyección desde el centro del globo
                     dx = screen_x - globe_center_x
                     dy = screen_y - globe_center_y
                     dist = math.hypot(dx, dy)
-                    if dist == 0: continue # Evitar división por cero
+                    if dist == 0: continue
 
-                    # 3. Encontrar el punto final de la línea proyectada
-                    projection_dist = 40  # Distancia en píxeles para proyectar la etiqueta
+                    projection_dist = 40
                     end_line_x = screen_x + (dx / dist) * projection_dist
                     end_line_y = screen_y + (dy / dist) * projection_dist
 
-                    # 4. Dibujar la etiqueta en el punto final
                     tag_topleft = self.get_hud_tag_topleft((end_line_x, end_line_y), str(i))
                     self.draw_hud_tag(self.screen, tag_topleft, str(i), color)
 
-                    # 5. Dibujar la línea desde el punto en el globo hasta el inicio de la etiqueta
                     draw_dashed_line(self.screen, color, (screen_x, screen_y), (end_line_x, end_line_y))
                     
-                    # 6. Dibujar el marcador del evento (al final, para que esté por encima de la línea)
                     alpha = int(100 + 155 * (z3d if z3d > 0 else 0))
                     pygame.draw.circle(self.screen, COLOR_YELLOW + (alpha,), (screen_x, screen_y), 4)
 
-        # Finalmente, dibujar el HUD de texto a la izquierda
         self.draw_eonet_hud(events)
 
     def get_hud_tag_topleft(self, center_pos, text):

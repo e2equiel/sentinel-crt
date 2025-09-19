@@ -18,7 +18,9 @@ class ASCIIGlobe:
         self.chars = ".,-~:;=!*#$@"
         
         self.points = []
+        self.sea_points = []
         self.rotated_points = []
+        self.rotated_sea_points = []
         
         self._generate_points_from_map()
 
@@ -36,18 +38,26 @@ class ASCIIGlobe:
         map_width = len(lines[0].strip())
 
         self.points = []
+        self.sea_points = []
         for r, line in enumerate(lines):
             for c, char in enumerate(line):
-                if char == '+': # Solo procesamos los puntos de 'tierra'
+                if char == '+' or char == '.':
+                    # Usamos la fórmula de longitud estándar (sin offsets)
                     lon = math.pi * (c / (map_width / 2) - 1)
-                    lat = math.pi * (r / map_height - 0.5)
+                    
+                    lat = math.pi * (0.5 - r / map_height)
                     
                     x = self.radius * math.cos(lat) * math.cos(lon)
                     y = self.radius * math.sin(lat)
-                    z = self.radius * math.cos(lat) * math.sin(lon)
+                    # <-- CORRECCIÓN: Negamos Z para invertir el frente/detrás del globo
+                    z = -self.radius * math.cos(lat) * math.sin(lon)
                     
-                    self.points.append(np.array([-x, y, z]))
+                    point_3d = np.array([x, y, z])
 
+                    if char == '+':
+                        self.points.append(point_3d)
+                    else:
+                        self.sea_points.append(point_3d)
 
     def update(self, angle_x, angle_y):
         """Rota los puntos del globo usando matrices de rotación."""
@@ -65,17 +75,31 @@ class ASCIIGlobe:
         
         self.rotated_points = [np.dot(rotation_y, p) for p in self.points]
         self.rotated_points = [np.dot(rotation_x, p) for p in self.rotated_points]
+        
+        self.rotated_sea_points = [np.dot(rotation_y, p) for p in self.sea_points]
+        self.rotated_sea_points = [np.dot(rotation_x, p) for p in self.rotated_sea_points]
 
     def draw(self, surface, font, color):
         """Dibuja el globo ASCII en la superficie de Pygame."""
-        light_vector = np.array([0, 0, -1])
+        light_vector = np.array([0, 0, 1])
+        
+        sea_char_surf = font.render(".", True, color + (60,))
+        for p in self.rotated_sea_points:
+            x, y, z = p[0], p[1], p[2]
+            if z > 0:
+                # <-- CORREGIDO: Usamos (centro - y) para invertir el eje Y y que coincida con los eventos
+                screen_x = int(x + self.center_x)
+                screen_y = int(self.center_y - y)
+                if 0 <= screen_x < self.screen_width and 0 <= screen_y < self.screen_height:
+                    surface.blit(sea_char_surf, (screen_x, screen_y))
         
         for p in self.rotated_points:
             x, y, z = p[0], p[1], p[2]
 
             if z > 0:
+                # <-- CORREGIDO: Usamos (centro - y) aquí también
                 screen_x = int(x + self.center_x)
-                screen_y = int(y + self.center_y)
+                screen_y = int(self.center_y - y)
                 
                 if not (0 <= screen_x < self.screen_width and 0 <= screen_y < self.screen_height):
                     continue
@@ -93,4 +117,3 @@ class ASCIIGlobe:
                     
                     char_surf = font.render(self.chars[char_index], True, color + (alpha,))
                     surface.blit(char_surf, (screen_x, screen_y))
-
