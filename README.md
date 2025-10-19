@@ -48,6 +48,7 @@ It's recommended to use a Python virtual environment.
 ```bash
 python3 -m venv venv
 source venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -91,7 +92,19 @@ The application uses the `VT323` font. Download `VT323-Regular.ttf` from [Google
 You may need to install some system libraries for OpenCV and Pygame to work correctly.
 ```bash
 sudo apt update && sudo apt upgrade
-sudo apt install -y libopencv-dev libatlas-base-dev libavformat-dev libavcodec-dev libswscale-dev libqtgui4 libqt4-test
+sudo apt install -y git python3 python3-pip python3-venv libatlas-base-dev libavformat-dev \
+  libavcodec-dev libswscale-dev libqtgui4 libqt4-test libopenjp2-7 libtiff5 libjpeg-dev \
+  libhdf5-dev libopenblas-dev liblapack-dev libxcb1-dev libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 \
+  libsdl2-ttf-2.0-0 libportmidi0 libfreetype6-dev libglib2.0-0
+```
+
+After installing the packages, create and activate a virtual environment (if you did not already do so during the repository set up) and install the Python dependencies:
+
+```bash
+python3 -m venv ~/sentinel-crt/venv
+source ~/sentinel-crt/venv/bin/activate
+pip install --upgrade pip
+pip install -r ~/sentinel-crt/requirements.txt
 ```
 
 ### 3. Follow Installation Steps
@@ -138,3 +151,111 @@ To make the script run automatically when the Raspberry Pi starts, you can creat
     sudo systemctl start sentinel-crt.service
     ```
 You can check its status with `sudo systemctl status sentinel-crt.service`.
+
+## Home Assistant Flight Radar Integration
+
+Sentinel CRT expects flight data over MQTT on the topic configured in `config.py` (`flight_topic`, default `flights/overhead`). Each message can be a single JSON object or a JSON array of aircraft objects. The application calculates proximity based on your configured `map_latitude` and `map_longitude` and displays the closest aircraft. The following fields are used:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | ✅ | Unique identifier for the aircraft (ICAO hex, call sign + timestamp, etc.). |
+| `latitude` / `longitude` | ✅ | Current aircraft position in decimal degrees. |
+| `altitude` | ✅ | Altitude in feet. Used for filtering below `min_flight_altitude_ft`. |
+| `speed` | ✅ | Ground speed in knots. |
+| `track` | ✅ | Heading in degrees (0–359). |
+| `callsign` | ✅ | Aircraft call sign. Displayed in the info panel. |
+| `model` | ✅ | Aircraft model or type description. |
+| `airport_origin_code` | Optional | IATA/ICAO code for the origin airport. |
+| `airport_destination_code` | Optional | IATA/ICAO code for the destination airport. |
+| `photo` | Optional | HTTPS URL to a square-ish aircraft image. |
+
+### Example Home Assistant Automations
+
+#### Publish a Full Aircraft List from FlightRadar24
+
+The following automation polls the [FlightRadar24 integration](https://www.home-assistant.io/integrations/flightradar24/) every five seconds, builds an array of aircraft dictionaries, and publishes the entire list to `flights/overhead`.
+
+```yaml
+alias: Send Aircraft Fleet to CRT Monitor
+description: Sends the complete aircraft list to the monitor via MQTT
+mode: single
+trigger:
+  - platform: time_pattern
+    seconds: "/5"
+condition: []
+action:
+  - service: mqtt.publish
+    data:
+      topic: flights/overhead
+      retain: false
+      payload: >-
+        {% set aircraft_list = state_attr('sensor.flightradar24_current_in_area', 'flights') %}
+        {% if aircraft_list and aircraft_list | count > 0 %}
+          [
+          {% for aircraft in aircraft_list %}
+            {
+              "id": "{{ aircraft.get('id') }}",
+              "callsign": "{{ aircraft.get('callsign', 'N/A') }}",
+              "altitude": {{ aircraft.get('altitude', 0) }},
+              "speed": {{ aircraft.get('ground_speed', 0) }},
+              "track": {{ aircraft.get('heading', 0) }},
+              "latitude": {{ aircraft.get('latitude', 0) }},
+              "longitude": {{ aircraft.get('longitude', 0) }},
+              "photo": "{{ aircraft.get('aircraft_photo_small', '') }}",
+              "model": "{{ aircraft.get('aircraft_model', '') }}",
+              "airport_origin_code": "{{ aircraft.get('airport_origin_code_iata', '') }}",
+              "airport_destination_code": "{{ aircraft.get('airport_destination_code_iata', '') }}",
+              "airport_origin_name": "{{ aircraft.get('airport_origin_name', '') }}",
+              "airport_destination_name": "{{ aircraft.get('airport_destination_name', '') }}"
+            }
+            {% if not loop.last %},{% endif %}
+          {% endfor %}
+          ]
+        {% else %}
+          []
+        {% endif %}
+```
+
+#### Publish the Nearest Aircraft from ADS-B Exchange
+
+Below is an example automation that publishes the nearest aircraft reported by the [ADS-B Exchange integration](https://www.home-assistant.io/integrations/adsb/) to the MQTT topic `flights/overhead`. Update the sensor/entity names to match your installation.
+
+```yaml
+alias: Publish nearest aircraft to Sentinel CRT
+mode: single
+trigger:
+  - platform: state
+    entity_id: sensor.adsb_exchange_nearest
+  - platform: time_pattern
+    minutes: "/1"
+variables:
+  aircraft: "{{ state_attr('sensor.adsb_exchange_nearest', 'aircraft') or {} }}"
+condition:
+  - condition: template
+    value_template: "{{ aircraft.get('latitude') is not none and aircraft.get('longitude') is not none }}"
+action:
+  - service: mqtt.publish
+    data:
+      topic: flights/overhead
+      payload: >-
+        {{
+          [{
+            "id": aircraft.get('hex', ''),
+            "callsign": aircraft.get('flight', 'UNKNOWN'),
+            "model": aircraft.get('type', 'N/A'),
+            "latitude": aircraft.get('latitude'),
+            "longitude": aircraft.get('longitude'),
+            "altitude": aircraft.get('altitude_baro', 0) | int,
+            "speed": aircraft.get('ground_speed', 0) | int,
+            "track": aircraft.get('track', 0) | int,
+            "airport_origin_code": aircraft.get('origin', 'N/A'),
+            "airport_destination_code": aircraft.get('destination', 'N/A'),
+            "photo": state_attr('sensor.adsb_exchange_nearest', 'image')
+          }]
+          | tojson
+        }}
+      qos: 0
+      retain: false
+```
+
+If you track multiple aircraft, build a list in the `variables` section and publish the entire array. Sentinel CRT will automatically select and highlight the closest aircraft and switch to the radar view when any aircraft remain above `min_flight_altitude_ft`.
