@@ -16,6 +16,9 @@ import math
 # Import configuration from the separate config file
 import config
 
+from sentinel.config import load_configuration
+from sentinel.core import ModuleManager
+
 from neo_tracker import NEOTracker
 from eonet_tracker import EONETTracker
 from ascii_globe import ASCIIGlobe # <-- AÑADIDO
@@ -87,11 +90,31 @@ def draw_diagonal_pattern(surface, color, rect, angle, spacing=5, line_width=1, 
 class SentinelApp:
     def __init__(self):
         pygame.init()
-        # Use config dictionary for settings
-        #self.screen = pygame.display.set_mode((config.CONFIG["screen_width"], config.CONFIG["screen_height"]))
-        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+
+        self.settings = load_configuration()
+        self.core_settings = dict(self.settings.core)
+
+        if hasattr(config, "CONFIG") and isinstance(config.CONFIG, dict):
+            config.CONFIG.update(self.core_settings)
+        else:
+            config.CONFIG = dict(self.core_settings)
+
+        base_theme = getattr(config, "THEME_COLORS", {})
+        if not isinstance(base_theme, dict):
+            base_theme = {}
+        self.theme_colors = dict(base_theme)
+        self.theme_colors.update(self.settings.theme_colors)
+        config.THEME_COLORS = self.theme_colors
+
+        fullscreen = self.core_settings.get("fullscreen", True)
+        if fullscreen:
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        else:
+            width = self.core_settings.get("screen_width", 640)
+            height = self.core_settings.get("screen_height", 480)
+            self.screen = pygame.display.set_mode((width, height))
+
         pygame.mouse.set_visible(False)
-        #pygame.display.set_caption("S.E.N.T.I.N.E.L. v1.0")
         self.clock = pygame.time.Clock()
 
         try:
@@ -109,7 +132,7 @@ class SentinelApp:
         self.reset_pending = False
         
         # Application States
-        self.current_screen = config.CONFIG["startup_screen"] if config.CONFIG["startup_screen"] != "auto" else "camera"
+        self.current_screen = None
         self.mqtt_status = "CONNECTING..."
         self.video_status = "INITIALIZING"
         self.current_video_frame = None
@@ -126,7 +149,7 @@ class SentinelApp:
 
         # Alert State
         self.alert_level = "none" # none, warning, danger
-        self.current_theme_color = config.THEME_COLORS['default']
+        self.current_theme_color = self.theme_colors['default']
         self.header_title_text = "S.E.N.T.I.N.E.L. v1.0"
 
         # Flight Data
@@ -164,9 +187,12 @@ class SentinelApp:
         self.eonet_tracker.start_periodic_fetch(interval_hours=1)
 
         # Screen Cycling
-        self.idle_screen_list = config.CONFIG.get("idle_screen_list", ["camera", "neo_tracker"])
-        self.current_idle_index = 0
-        self.idle_screen_timer = 0
+        priorities_idle = self.settings.priorities.get("idle", {}) if isinstance(self.settings.priorities, dict) else {}
+        idle_cycle = priorities_idle.get("cycle") if isinstance(priorities_idle, dict) else None
+        if idle_cycle:
+            self.idle_screen_list = list(idle_cycle)
+        else:
+            self.idle_screen_list = config.CONFIG.get("idle_screen_list", ["camera", "neo_tracker"])
         
         # NEO & Globe Screen state
         self.sphere_rotation_angle = 0
@@ -192,25 +218,61 @@ class SentinelApp:
         # Grid and Graph Resources
         self.grid_cell_size = 40
         self.patterns_green = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['default'] + (160,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['default'] + (160,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, self.theme_colors['default'] + (160,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, self.theme_colors['default'] + (160,))
         }
         self.patterns_orange = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['warning'] + (160,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['warning'] + (160,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, self.theme_colors['warning'] + (160,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, self.theme_colors['warning'] + (160,))
         }
         self.patterns_red = {
-            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, config.THEME_COLORS['danger'] + (160,)),
-            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, config.THEME_COLORS['danger'] + (160,))
+            'dots': self.create_tiled_pattern_surface('dots', self.grid_cell_size, self.theme_colors['danger'] + (160,)),
+            'lines': self.create_tiled_pattern_surface('lines', self.grid_cell_size, self.theme_colors['danger'] + (160,))
         }
         self.zoom_grid_map = []; self.zoom_grid_update_timer = 0
         self.update_zoom_grid_map()
         self.graph_data = deque(maxlen=self.analysis_graph_rect.width)
 
+        self.module_manager = None
+
         self.start_mqtt_client()
         self.video_thread = None
         self.video_thread_running = False
         self.start_video_capture()
+
+        modules_to_load = {}
+        for name, module_settings in self.settings.modules.items():
+            if not module_settings.enabled:
+                continue
+            try:
+                module = ModuleManager.create_from_config(
+                    {"module": module_settings.path, "config": module_settings.settings}
+                )
+            except Exception as exc:
+                print(f"[ModuleManager] Unable to load module '{name}': {exc}")
+                continue
+            modules_to_load[name] = module
+
+        if modules_to_load:
+            self.module_manager = ModuleManager(
+                self,
+                modules_to_load,
+                priorities=self.settings.priorities,
+                idle_cycle=self.idle_screen_list,
+            )
+
+            startup_screen = self.core_settings.get("startup_screen", "camera")
+            if isinstance(startup_screen, str) and startup_screen.lower() == "auto":
+                startup_screen = None
+
+            if startup_screen and startup_screen in self.module_manager.modules:
+                self.module_manager.set_active(startup_screen)
+            elif self.module_manager.modules:
+                first_screen = next(iter(self.module_manager.modules))
+                self.module_manager.set_active(first_screen)
+        else:
+            print("[ModuleManager] No modules configured; defaulting to camera view")
+            self.current_screen = "camera"
 
         # Load map on startup if needed
         if self.current_screen == "radar":
@@ -244,7 +306,10 @@ class SentinelApp:
         with self.data_lock:
             self.mqtt_status = "CONNECTING..."
             self.video_status = "INITIALIZING"
-            self.current_screen = config.CONFIG["startup_screen"] if config.CONFIG["startup_screen"] != "auto" else "camera"
+            startup_screen = config.CONFIG.get("startup_screen", "camera")
+            if isinstance(startup_screen, str) and startup_screen.lower() == "auto":
+                startup_screen = "camera"
+            self.current_screen = startup_screen
             self.map_surface = None
             self.map_status = "NO DATA"
             
@@ -257,7 +322,7 @@ class SentinelApp:
             self.mqtt_activity = 0.0
 
             self.alert_level = "none"
-            self.current_theme_color = config.THEME_COLORS['default']
+            self.current_theme_color = self.theme_colors['default']
             self.header_title_text = "S.E.N.T.I.N.E.L. v1.0"
 
             self.active_flights = []
@@ -279,6 +344,13 @@ class SentinelApp:
         self.start_mqtt_client()
         self.start_video_capture()
         
+        if self.module_manager:
+            target = self.current_screen
+            if not target:
+                target = next(iter(self.module_manager.modules), None)
+            if target:
+                self.module_manager.set_active(target)
+
         if self.current_screen == "radar":
             threading.Thread(target=self.update_map_tiles, daemon=True).start()
 
@@ -530,48 +602,58 @@ class SentinelApp:
             with self.data_lock: self.closest_flight_photo_surface = None
 
     def run(self):
-        while self.running:
-            self.handle_events(), self.update(), self.draw()
-            self.clock.tick(config.CONFIG["fps"])
-        print("Closing application..."), self.mqtt_client.loop_stop(), self.mqtt_client.disconnect(), pygame.quit(), sys.exit()
+        try:
+            while self.running:
+                dt = self.clock.tick(self.core_settings.get("fps", 30)) / 1000.0
+                self.handle_events()
+                self.update(dt)
+                self.draw()
+        finally:
+            self.shutdown()
+
+    def shutdown(self):
+        print("Closing application...")
+        if self.module_manager:
+            self.module_manager.shutdown()
+        self.mqtt_client.loop_stop()
+        self.mqtt_client.disconnect()
+        pygame.quit()
+        sys.exit()
 
     def handle_events(self):
         for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE): self.running = False
-    
-    def update(self):
+            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                self.running = False
+                continue
+            if self.module_manager:
+                self.module_manager.handle_event(event)
+
+    def update(self, dt: float):
         if self.reset_pending:
             self._execute_hard_reset()
             self.reset_pending = False
             return
 
-        now = time.time()
         self.update_detections()
         self.update_alert_level()
+        if self.module_manager:
+            if "camera" in self.module_manager.modules:
+                if self.alert_level != "none":
+                    self.module_manager.report_state("camera", self.alert_level, metadata={"source": "alerts"})
+                else:
+                    self.module_manager.clear_state("camera")
 
-        # --- INICIO DE LA NUEVA LÓGICA DE PRIORIDAD DE PANTALLAS ---
-        with self.data_lock:
-            # Prioridad 1: Alerta Activa
-            if self.alert_level != "none":
-                self.current_screen = "camera"
-                # Reseteamos el temporizador del ciclo para que no cambie de pantalla
-                self.idle_screen_timer = now + config.CONFIG.get("idle_screen_time", 20)
+            if "radar" in self.module_manager.modules:
+                if self.active_flights:
+                    self.module_manager.report_state(
+                        "radar",
+                        "air-traffic",
+                        metadata={"count": len(self.active_flights)},
+                    )
+                else:
+                    self.module_manager.clear_state("radar")
 
-            # Prioridad 2: Tráfico Aéreo
-            elif self.active_flights:
-                self.current_screen = "radar"
-                # También reseteamos el temporizador
-                self.idle_screen_timer = now + config.CONFIG.get("idle_screen_time", 20)
-            
-            # Prioridad 3: Ciclo Pasivo (No hay alertas ni vuelos)
-            else:
-                if now > self.idle_screen_timer:
-                    # Avanza a la siguiente pantalla en la lista de inactividad
-                    self.current_idle_index = (self.current_idle_index + 1) % len(self.idle_screen_list)
-                    self.current_screen = self.idle_screen_list[self.current_idle_index]
-                    # Establece el temporizador para el próximo cambio
-                    self.idle_screen_timer = now + config.CONFIG.get("idle_screen_time", 20)
-        # --- FIN DE LA NUEVA LÓGICA ---
+            self.module_manager.update(dt)
 
         if self.current_screen == "camera":
             self.update_zoom_priority()
@@ -622,13 +704,13 @@ class SentinelApp:
             
             self.alert_level = current_level
             if self.alert_level == "danger":
-                self.current_theme_color = config.THEME_COLORS['danger']
+                self.current_theme_color = self.theme_colors['danger']
                 self.header_title_text = "DANGER"
             elif self.alert_level == "warning":
-                self.current_theme_color = config.THEME_COLORS['warning']
+                self.current_theme_color = self.theme_colors['warning']
                 self.header_title_text = "WARNING"
             else:
-                self.current_theme_color = config.THEME_COLORS['default']
+                self.current_theme_color = self.theme_colors['default']
                 self.header_title_text = "S.E.N.T.I.N.E.L. v1.0"
 
     def update_visual_effects(self):
@@ -719,16 +801,22 @@ class SentinelApp:
     def draw(self):
         self.screen.fill(COLOR_BLACK)
 
-        # Dibuja el contenido de la pantalla actual
-        if self.current_screen == "camera": self.draw_camera_view()
-        elif self.current_screen == "radar": self.draw_radar_view()
-        elif self.current_screen == "neo_tracker": self.draw_neo_tracker_screen()
-        elif self.current_screen == "eonet_globe": self.draw_eonet_globe_screen()
-        # elif self.current_screen == "ha_status": self.draw_ha_status_screen()
-        else: self.draw_camera_view()
+        if self.module_manager and self.module_manager.current_screen:
+            self.module_manager.render(self.screen)
+        else:
+            if self.current_screen == "camera":
+                self.draw_camera_view()
+            elif self.current_screen == "radar":
+                self.draw_radar_view()
+            elif self.current_screen == "neo_tracker":
+                self.draw_neo_tracker_screen()
+            elif self.current_screen == "eonet_globe":
+                self.draw_eonet_globe_screen()
+            else:
+                self.draw_camera_view()
 
         # Dibuja el header encima de todo, si está habilitado
-        if config.CONFIG['show_header']:
+        if config.CONFIG.get('show_header', True):
             self.draw_header()
 
         pygame.display.flip()
@@ -869,7 +957,7 @@ class SentinelApp:
 
         panel_surface = pygame.Surface(self.map_area_rect.size, pygame.SRCALPHA)
         panel_surface.fill((0, 0, 0, 120)) 
-        pygame.draw.rect(panel_surface, config.THEME_COLORS['default'], panel_surface.get_rect(), 1)
+        pygame.draw.rect(panel_surface, self.theme_colors['default'], panel_surface.get_rect(), 1)
         self.screen.blit(panel_surface, self.map_area_rect.topleft)
         
         if config.CONFIG.get("map_radial_lines", False):
@@ -929,16 +1017,16 @@ class SentinelApp:
         if self.map_area_rect.collidepoint(home_pos):
             size = 8
             home_rect = pygame.Rect(home_pos[0] - size, home_pos[1] - size, size * 2, size * 2)
-            pygame.draw.rect(self.screen, config.THEME_COLORS['default'], home_rect, 1)
-            pygame.draw.line(self.screen, config.THEME_COLORS['default'], (home_rect.left, home_rect.centery), (home_rect.right, home_rect.centery), 1)
-            pygame.draw.line(self.screen, config.THEME_COLORS['default'], (home_rect.centerx, home_rect.top), (home_rect.centerx, home_rect.bottom), 1)
+            pygame.draw.rect(self.screen, self.theme_colors['default'], home_rect, 1)
+            pygame.draw.line(self.screen, self.theme_colors['default'], (home_rect.left, home_rect.centery), (home_rect.right, home_rect.centery), 1)
+            pygame.draw.line(self.screen, self.theme_colors['default'], (home_rect.centerx, home_rect.top), (home_rect.centerx, home_rect.bottom), 1)
 
         closest_flight_pos = None
         for flight in self.active_flights:
             screen_pos = self.get_screen_pos_from_coords(flight.get('latitude'), flight.get('longitude'))
             if self.map_area_rect.collidepoint(screen_pos):
                 is_closest = (flight == self.closest_flight)
-                plane_size, color = (12, COLOR_YELLOW) if is_closest else (8, config.THEME_COLORS['default'])
+                plane_size, color = (12, COLOR_YELLOW) if is_closest else (8, self.theme_colors['default'])
                 angle = math.radians(flight.get('track', 0) - 90)
                 cos_a, sin_a = math.cos(angle), math.sin(angle)
                 points = [(-plane_size, -plane_size//2), (plane_size, 0), (-plane_size, plane_size//2)]
@@ -959,17 +1047,17 @@ class SentinelApp:
     def draw_flight_info_panel(self):
         panel_surface = pygame.Surface(self.flight_panel_rect.size, pygame.SRCALPHA)
         panel_surface.fill((0, 0, 0, 180)) 
-        pygame.draw.rect(panel_surface, config.THEME_COLORS['default'], panel_surface.get_rect(), 1)
+        pygame.draw.rect(panel_surface, self.theme_colors['default'], panel_surface.get_rect(), 1)
         
         title_surf = self.font_medium.render("CLOSEST AIRCRAFT", True, COLOR_YELLOW)
         panel_surface.blit(title_surf, (10, 10))
-        pygame.draw.line(panel_surface, config.THEME_COLORS['default'], (10, 35), (self.flight_panel_rect.width - 10, 35), 1)
+        pygame.draw.line(panel_surface, self.theme_colors['default'], (10, 35), (self.flight_panel_rect.width - 10, 35), 1)
 
         y_offset = 45
         with self.data_lock: flight, photo = self.closest_flight, self.closest_flight_photo_surface
         
         if not flight:
-            panel_surface.blit(self.font_small.render("> NO TARGETS...", True, config.THEME_COLORS['default']), (10, y_offset))
+            panel_surface.blit(self.font_small.render("> NO TARGETS...", True, self.theme_colors['default']), (10, y_offset))
         else:
             details = {
                 "CALLSIGN:": flight.get('callsign', 'N/A').upper(), "MODEL:": flight.get('model', 'N/A'),
@@ -977,13 +1065,13 @@ class SentinelApp:
                 "HEADING:": f"{flight.get('track', 0)}°"
             }
             for label, value in details.items():
-                panel_surface.blit(self.font_small.render(label, True, config.THEME_COLORS['default']), (10, y_offset))
+                panel_surface.blit(self.font_small.render(label, True, self.theme_colors['default']), (10, y_offset))
                 panel_surface.blit(self.font_medium.render(value, True, COLOR_WHITE), (10, y_offset + 14))
                 y_offset += 36
             
-            pygame.draw.line(panel_surface, config.THEME_COLORS['default'], (10, y_offset), (self.flight_panel_rect.width - 10, y_offset), 1)
+            pygame.draw.line(panel_surface, self.theme_colors['default'], (10, y_offset), (self.flight_panel_rect.width - 10, y_offset), 1)
             y_offset += 8
-            panel_surface.blit(self.font_small.render("ROUTE:", True, config.THEME_COLORS['default']), (10, y_offset))
+            panel_surface.blit(self.font_small.render("ROUTE:", True, self.theme_colors['default']), (10, y_offset))
             route_text = f"{flight.get('airport_origin_code', 'N/A')} > {flight.get('airport_destination_code', 'N/A')}"
             panel_surface.blit(self.font_medium.render(route_text, True, COLOR_WHITE), (10, y_offset + 14))
             
@@ -993,12 +1081,12 @@ class SentinelApp:
                 photo_rect = pygame.Rect(10, self.flight_panel_rect.height - photo_h - 10, panel_w, photo_h)
                 scaled_photo = pygame.transform.scale(photo, photo_rect.size)
                 panel_surface.blit(scaled_photo, photo_rect)
-                pygame.draw.rect(panel_surface, config.THEME_COLORS['default'], photo_rect, 1)
+                pygame.draw.rect(panel_surface, self.theme_colors['default'], photo_rect, 1)
             else:
                 photo_rect = pygame.Rect(10, self.flight_panel_rect.height - 80 - 10, self.flight_panel_rect.width - 20, 80)
-                no_img_surf = self.font_small.render("NO IMAGE DATA", True, config.THEME_COLORS['default'])
+                no_img_surf = self.font_small.render("NO IMAGE DATA", True, self.theme_colors['default'])
                 panel_surface.blit(no_img_surf, no_img_surf.get_rect(center=photo_rect.center))
-                pygame.draw.rect(panel_surface, config.THEME_COLORS['default'], photo_rect, 1)
+                pygame.draw.rect(panel_surface, self.theme_colors['default'], photo_rect, 1)
 
         self.screen.blit(panel_surface, self.flight_panel_rect.topleft)
 
@@ -1232,7 +1320,7 @@ class SentinelApp:
             
             text_x_offset = x_offset + number_box_size + 8
 
-            category_color = config.THEME_COLORS['warning'] if event['category'] in ['Wildfires', 'Severe Storms'] else COLOR_WHITE
+            category_color = self.theme_colors['warning'] if event['category'] in ['Wildfires', 'Severe Storms'] else COLOR_WHITE
             
             cat_surf = self.font_small.render(f"[{event['category'].upper()}]", True, category_color)
             self.screen.blit(cat_surf, (text_x_offset, y_offset))
@@ -1310,7 +1398,7 @@ class SentinelApp:
         # --- Lógica de una sola columna ---
         is_hazardous = neo_data['is_hazardous']
         assessment_text = "!!! POTENTIAL HAZARD !!!" if is_hazardous else "[ NOMINAL ]"
-        assessment_color = config.THEME_COLORS['danger'] if is_hazardous else COLOR_WHITE
+        assessment_color = self.theme_colors['danger'] if is_hazardous else COLOR_WHITE
 
         # Combinamos toda la info en una sola lista de tuplas (etiqueta, valor, color_valor)
         info_lines = [
@@ -1379,7 +1467,7 @@ class SentinelApp:
         ast_x = (1 - t)**2 * p0[0] + 2 * (1 - t) * t * p1[0] + t**2 * p2[0]
         ast_y = (1 - t)**2 * p0[1] + 2 * (1 - t) * t * p1[1] + t**2 * p2[1]
         
-        ast_color = config.THEME_COLORS['danger'] if neo_data['is_hazardous'] else COLOR_YELLOW
+        ast_color = self.theme_colors['danger'] if neo_data['is_hazardous'] else COLOR_YELLOW
         pygame.draw.circle(self.screen, ast_color, (int(ast_x), int(ast_y)), 2) # Un simple círculo para el asteroide
 
 if __name__ == '__main__':
