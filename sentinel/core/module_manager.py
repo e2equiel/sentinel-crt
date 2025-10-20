@@ -92,8 +92,10 @@ class ModuleManager:
         idle_cfg = raw_config.get("idle", {}) if isinstance(raw_config, Mapping) else {}
         if isinstance(idle_cfg, Mapping):
             cycle = idle_cfg.get("cycle")
-            if isinstance(cycle, Iterable):
+            if isinstance(cycle, Iterable) and not isinstance(cycle, (str, bytes)):
                 self._idle_cycle = list(cycle)
+            elif isinstance(cycle, (str, bytes)):
+                self._idle_cycle = [cycle.decode() if isinstance(cycle, bytes) else cycle]
             dwell = idle_cfg.get("dwell_seconds")
             if isinstance(dwell, (int, float)):
                 self._idle_dwell = max(0.0, float(dwell))
