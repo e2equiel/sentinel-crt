@@ -89,6 +89,13 @@ def draw_diagonal_pattern(surface, color, rect, angle, spacing=5, line_width=1, 
 
 class SentinelApp:
     def __init__(self):
+        """
+        Initialize the SentinelApp instance and start core UI state, background services, and modules.
+        
+        This constructor initializes Pygame and the display (fullscreen or windowed per configuration), loads runtime configuration and theme colors into the global config, configures fonts, and sets up all application state (UI regions, detection/alert state, zoom state, visual effect parameters, flight and map placeholders). It creates and starts periodic NASA trackers (NEO and EONET), initializes the ASCII globe visualization, prepares tiled pattern and graph resources, starts the MQTT client and video capture threads, and loads any configured modules via ModuleManager and selects the initial active screen. If the startup screen is the radar, a background thread is launched to preload map tiles.
+        
+        The constructor may exit the process if required fonts cannot be loaded.
+        """
         pygame.init()
 
         self.settings = load_configuration()
@@ -280,8 +287,9 @@ class SentinelApp:
 
     def _execute_hard_reset(self):
         """
-        Executes a full reset of the application state, including MQTT and Video threads.
-        This should be called from the main application thread.
+        Perform a full application reset by stopping background services, clearing runtime state, and restarting necessary threads.
+        
+        This method stops MQTT and video capture services, clears detection, map, flight, zoom, and graph state, restores default UI/theme values, restarts the MQTT and video threads, and reactivates the configured module or radar map update if applicable. Must be invoked from the main application thread.
         """
         print("INFO: Executing hard reset...")
         
@@ -589,7 +597,16 @@ class SentinelApp:
             print(f"Error downloading snapshot: {e}")
     
     def fetch_flight_photo(self, url):
-        """Downloads the aircraft photo."""
+        """
+        Fetch an aircraft image from the given URL and store it on the instance.
+        
+        Parameters:
+            url (str): HTTP(S) URL pointing to an aircraft photo.
+        
+        Description:
+            Attempts to download and decode the image; on success stores the loaded
+            pygame Surface in self.closest_flight_photo_surface, on failure stores None.
+        """
         try:
             response = requests.get(url, timeout=5)
             response.raise_for_status()
@@ -602,6 +619,11 @@ class SentinelApp:
             with self.data_lock: self.closest_flight_photo_surface = None
 
     def run(self):
+        """
+        Run the application's main loop until stopped.
+        
+        Continuously processes input events, updates application state, and renders frames at the configured frame rate. Guarantees that shutdown() is called when the loop exits.
+        """
         try:
             while self.running:
                 dt = self.clock.tick(self.core_settings.get("fps", 30)) / 1000.0
@@ -612,6 +634,14 @@ class SentinelApp:
             self.shutdown()
 
     def shutdown(self):
+        """
+        Shuts down the application and terminates all background services.
+        
+        Stops and shuts down the module manager if present, stops the MQTT network loop and disconnects the client, quits Pygame, and exits the process.
+        
+        Raises:
+            SystemExit: terminates the running process.
+        """
         print("Closing application...")
         if self.module_manager:
             self.module_manager.shutdown()
@@ -621,6 +651,11 @@ class SentinelApp:
         sys.exit()
 
     def handle_events(self):
+        """
+        Polls the Pygame event queue, handles application quit/escape, and forwards remaining events to the module manager.
+        
+        If a QUIT event or an ESC keydown is received, sets `self.running` to False to request shutdown. If a ModuleManager is present, each event is passed to its `handle_event` method.
+        """
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 self.running = False
@@ -629,6 +664,14 @@ class SentinelApp:
                 self.module_manager.handle_event(event)
 
     def update(self, dt: float):
+        """
+        Advance the application's state by one frame.
+        
+        Performs pending hard-reset processing, updates detections and alert level, synchronizes module manager state, advances zoom logic when on the camera screen, progresses globe/planet/asteroid animations (including the ASCII globe), updates visual HUD effects, and decays/records MQTT activity for the analysis graph.
+        
+        Parameters:
+            dt (float): Time elapsed since the last update call, in seconds.
+        """
         if self.reset_pending:
             self._execute_hard_reset()
             self.reset_pending = False
@@ -689,7 +732,11 @@ class SentinelApp:
             self.graph_data.append(np.clip(new_y, 5, graph_h - 5))
 
     def update_alert_level(self):
-        """Determines the current alert level based on detection zones."""
+        """
+        Update the application's alert level based on active detections and configured alert zones.
+        
+        Considers only active detections whose label is listed in the configured `zoom_labels`. If any such detection has entered a zone listed in `alert_zones['danger']`, the alert level is set to "danger"; otherwise if any have entered a zone listed in `alert_zones['warning']`, the alert level is set to "warning"; if neither applies the alert level is "none". Side effects: sets `self.alert_level`, `self.current_theme_color`, and `self.header_title_text` to values appropriate for the resolved level.
+        """
         current_level = "none"
         with self.data_lock:
             for detection in self.active_detections.values():
@@ -714,6 +761,11 @@ class SentinelApp:
                 self.header_title_text = "S.E.N.T.I.N.E.L. v1.0"
 
     def update_visual_effects(self):
+        """
+        Advance and refresh HUD and animation state used by the UI.
+        
+        Updates animation timers and state for the header spinner, patterned background phase, synthetic system-load string, randomized level-bar heights, and — when a snapshot is present — the scanner sweep position.
+        """
         now = time.time()
         self.spinner_angle += 4
         dt = self.clock.get_time() / 1000.0
@@ -799,6 +851,11 @@ class SentinelApp:
                 self.zoom_grid_update_timer = time.time() + 0.5
 
     def draw(self):
+        """
+        Render the active UI screen and header to the main display surface.
+        
+        Chooses a module-managed screen when a module manager and current module screen exist; otherwise renders one of the built-in screens ('camera', 'radar', 'neo_tracker', 'eonet_globe') with a fallback to the camera view. If the header is enabled in configuration, draws the header on top of the screen, then updates the display buffer.
+        """
         self.screen.fill(COLOR_BLACK)
 
         if self.module_manager and self.module_manager.current_screen:
@@ -947,7 +1004,20 @@ class SentinelApp:
         return screen_x, screen_y
 
     def draw_map_overlays(self):
-        """Draws all elements over the map: home base, planes, lines, etc."""
+        """
+        Render radar/map overlays on the map area including range rings, optional radial lines and labels, the configured home/base marker, aircraft markers (highlighting the closest), and a dashed line with distance label to the closest flight.
+        
+        This method:
+        - Draws concentric distance rings centered on the configured map latitude/longitude using the configured map radius and map_distance_rings.
+        - Optionally draws radial sector lines and cardinal/intermediate direction labels when `map_radial_lines` is enabled in configuration.
+        - Renders a boxed home/base marker at the configured coordinates if it lies inside the visible map area.
+        - Renders each active flight as a rotated triangular marker, visually highlighting the closest flight and drawing a selection rectangle around it.
+        - If a closest flight is present and visible, draws a dashed connector from home to the flight and renders the midpoint distance label.
+        
+        Notes:
+        - Overlays are drawn onto `self.screen` and constrained by `self.map_area_rect` / `self.visible_map_rect`.
+        - Several appearance and behavior aspects are driven by configuration keys such as `map_latitude`, `map_longitude`, `map_radius_m`, and `map_distance_rings`.
+        """
         home_pos = self.get_screen_pos_from_coords(config.CONFIG['map_latitude'], config.CONFIG['map_longitude'])
         
         pixels_per_meter = (self.visible_map_rect.width / 2) / config.CONFIG['map_radius_m']
@@ -1045,6 +1115,11 @@ class SentinelApp:
             self.screen.blit(dist_surf, dist_rect)
 
     def draw_flight_info_panel(self):
+        """
+        Render the "Closest Aircraft" information panel and blit it to the configured flight panel area.
+        
+        Renders a semi-transparent panel showing either a "NO TARGETS" message or details for the currently tracked closest flight (callsign, model, altitude, speed, heading, and route). If a flight photo is available it is scaled and displayed at the bottom of the panel; otherwise a "NO IMAGE DATA" placeholder box is shown. The panel border, text, and divider lines use the app's theme colors and the finished surface is blitted to self.flight_panel_rect on the main screen.
+        """
         panel_surface = pygame.Surface(self.flight_panel_rect.size, pygame.SRCALPHA)
         panel_surface.fill((0, 0, 0, 180)) 
         pygame.draw.rect(panel_surface, self.theme_colors['default'], panel_surface.get_rect(), 1)
@@ -1293,7 +1368,17 @@ class SentinelApp:
         return bg_rect
 
     def draw_eonet_hud(self, events):
-        """Dibuja el HUD de texto para la pantalla de EONET."""
+        """
+        Render the textual HUD for the EONET globe screen in the left margin.
+        
+        Displays a header and either a scanning status or a numbered list of up to 8 recent global events. For each event the HUD shows a numbered box, an uppercase category tag, and the event title (truncated with an ellipsis if longer than 35 characters). If an event's category is "Wildfires" or "Severe Storms", the category tag is rendered using the theme's warning color; all other text uses the standard colors from the current theme.
+        
+        Parameters:
+            events (list[dict]): A list of event objects. Each event should contain at least:
+                - 'category' (str): the event category name.
+                - 'title' (str): the event title to display.
+        
+        """
         margins = config.CONFIG['margins']
         x_offset = margins['left'] + 10
         y_offset = margins['top'] + 45
@@ -1379,7 +1464,18 @@ class SentinelApp:
                 pygame.draw.line(self.screen, color + (alpha,), (x1, y1), (x2, y2), width)
     
     def draw_neo_hud(self, neo_data):
-        """Draws the text information for the NEO tracker screen in a single top-left column."""
+        """
+        Render the NEO tracker HUD in the top-left column with concise threat and approach details.
+        
+        Parameters:
+            neo_data (dict | None): Object containing NEO information or None if unavailable. When present, expected keys:
+                - 'name' (str): Identifier of the NEO.
+                - 'diameter_m' (number): Estimated diameter in meters.
+                - 'velocity_kmh' (number): Relative velocity in kilometers per hour.
+                - 'approach_date' (str): Approach datetime string (date portion is displayed).
+                - 'miss_distance_km' (number): Closest approach distance in kilometers.
+                - 'is_hazardous' (bool): Hazard flag used to highlight assessment.
+        """
         margins = config.CONFIG['margins']
         x_offset = margins['left'] + 10
         y_offset = margins['top'] + 45 # Debajo del header
@@ -1420,7 +1516,16 @@ class SentinelApp:
             y_offset += line_height * 1.5 # Espacio extra entre pares de datos
     
     def draw_solar_system_map(self, neo_data):
-        """Draws a SMALL, schematic solar system map in the bottom-right corner."""
+        """
+        Render a compact schematic solar system mini-map in the bottom-right corner of the screen.
+        
+        Renders a framed mini-map showing the Sun, scaled orbital rings, planet markers, and a stylized asteroid trajectory. When NEO data is provided, the asteroid path and current asteroid marker are drawn; the NEO's miss distance adjusts the trajectory's proximity to the planetary orbits and the marker color reflects hazard status.
+        
+        Parameters:
+            neo_data (dict | None): Near-Earth object information used to plot the asteroid path. Expected keys:
+                - 'miss_distance_km' (numeric): Distance in kilometers used to scale the trajectory's closeness to the orbits.
+                - 'is_hazardous' (bool): If true, the asteroid marker is rendered using the danger theme color; otherwise a neutral color is used.
+        """
         # Define el área para nuestro "mini-mapa"
         map_rect = pygame.Rect(400, 280, 220, 180) # Posición y tamaño en la esquina inferior derecha
         center_x, center_y = map_rect.centerx, map_rect.centery
