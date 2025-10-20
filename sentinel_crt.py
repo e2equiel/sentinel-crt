@@ -18,18 +18,15 @@ import config
 
 from sentinel.config import load_configuration
 from sentinel.core import ModuleManager
+from sentinel.modules.common import draw_diagonal_pattern
 
 from neo_tracker import NEOTracker
 from eonet_tracker import EONETTracker
-from ascii_globe import ASCIIGlobe # <-- AÑADIDO
 
 # --- Constants ---
 # Colors are defined in the config file now for easier theme management.
 # We can keep them here if they are static, but moving them to config.py is also an option.
 COLOR_BLACK = (0, 0, 0)
-COLOR_WHITE = (220, 220, 220) 
-COLOR_YELLOW = (255, 255, 0)
-COLOR_RING = (0, 255, 65, 70)
 
 
 
@@ -56,36 +53,6 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     dLat, dLon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
     a = math.sin(dLat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dLon/2)**2
     return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1-a)))
-
-def draw_dashed_line(surf, color, start_pos, end_pos, width=1, dash_length=5):
-    """Draws a dashed line on a Pygame surface."""
-    x1, y1 = start_pos; x2, y2 = end_pos
-    dl = dash_length
-    if (x1 == x2 and y1 == y2): return
-    dx, dy = x2 - x1, y2 - y1
-    dist = math.hypot(dx, dy)
-    dashes = int(dist / dl)
-    for i in range(dashes // 2):
-        start = (x1 + dx * (i * 2) / dashes, y1 + dy * (i * 2) / dashes)
-        end = (x1 + dx * (i * 2 + 1) / dashes, y1 + dy * (i * 2 + 1) / dashes)
-        pygame.draw.line(surf, color, start, end, width)
-
-def draw_diagonal_pattern(surface, color, rect, angle, spacing=5, line_width=1, phase=0):
-    diagonal = int(math.hypot(rect.width, rect.height))
-    temp_surface = pygame.Surface((diagonal, diagonal), pygame.SRCALPHA)
-
-    phase_int = int(phase)
-    for x in range(-diagonal, diagonal, spacing):
-        x_pos = x + (phase_int % spacing)
-        pygame.draw.line(temp_surface, color, (x_pos, 0), (x_pos, diagonal), line_width)
-
-    rotated_surface = pygame.transform.rotozoom(temp_surface, angle, 1)
-    rotated_rect = rotated_surface.get_rect(center=rect.center)
-
-    original_clip = surface.get_clip()
-    surface.set_clip(rect)
-    surface.blit(rotated_surface, rotated_rect)
-    surface.set_clip(original_clip)
 
 class SentinelApp:
     def __init__(self):
@@ -203,22 +170,9 @@ class SentinelApp:
         
         # NEO & Globe Screen state
         self.sphere_rotation_angle = 0
-        self.globe_rotation_angle = 0 # For EONET
-        self.planet_angles = [random.uniform(0, 2 * math.pi) for _ in range(4)] # Ángulos iniciales para 4 planetas
+        self.globe_rotation_angle = 0  # For EONET
+        self.planet_angles = [random.uniform(0, 2 * math.pi) for _ in range(4)]
         self.asteroid_path_progress = 0.0
-
-        # <-- AÑADIDO: INICIALIZACIÓN DEL GLOBO ASCII -->
-        self.globe_center_x = self.screen.get_width() * 0.6
-        self.globe_center_y = self.screen.get_height() / 2 + 20
-        self.globe_radius = 160
-        self.ascii_globe = ASCIIGlobe(
-            self.screen.get_width(),
-            self.screen.get_height(),
-            self.globe_radius,
-            (self.globe_center_x, self.globe_center_y),
-            'earth_W140_H35.txt'
-        )
-        # <-- FIN DEL CÓDIGO AÑADIDO -->
         
         self.calculate_layout()
         
@@ -260,26 +214,33 @@ class SentinelApp:
                 continue
             modules_to_load[name] = module
 
-        if modules_to_load:
-            self.module_manager = ModuleManager(
-                self,
-                modules_to_load,
-                priorities=self.settings.priorities,
-                idle_cycle=self.idle_screen_list,
-            )
+        if not modules_to_load:
+            print("[ModuleManager] No modules configured; loading built-in defaults")
+            from sentinel.modules import CameraModule, RadarModule, NeoTrackerModule, EONETGlobeModule
 
-            startup_screen = self.core_settings.get("startup_screen", "camera")
-            if isinstance(startup_screen, str) and startup_screen.lower() == "auto":
-                startup_screen = None
+            modules_to_load = {
+                "camera": CameraModule(),
+                "radar": RadarModule(),
+                "neo_tracker": NeoTrackerModule(),
+                "eonet_globe": EONETGlobeModule(),
+            }
 
-            if startup_screen and startup_screen in self.module_manager.modules:
-                self.module_manager.set_active(startup_screen)
-            elif self.module_manager.modules:
-                first_screen = next(iter(self.module_manager.modules))
-                self.module_manager.set_active(first_screen)
-        else:
-            print("[ModuleManager] No modules configured; defaulting to camera view")
-            self.current_screen = "camera"
+        self.module_manager = ModuleManager(
+            self,
+            modules_to_load,
+            priorities=self.settings.priorities,
+            idle_cycle=self.idle_screen_list,
+        )
+
+        startup_screen = self.core_settings.get("startup_screen", "camera")
+        if isinstance(startup_screen, str) and startup_screen.lower() == "auto":
+            startup_screen = None
+
+        if startup_screen and startup_screen in self.module_manager.modules:
+            self.module_manager.set_active(startup_screen)
+        elif self.module_manager.modules:
+            first_screen = next(iter(self.module_manager.modules))
+            self.module_manager.set_active(first_screen)
 
         # Load map on startup if needed
         if self.current_screen == "radar":
@@ -706,12 +667,9 @@ class SentinelApp:
         if self.sphere_rotation_angle > math.pi * 2:
             self.sphere_rotation_angle = 0
             
-        self.globe_rotation_angle += 0.008 # Slower rotation for the globe
+        self.globe_rotation_angle += 0.008  # Slower rotation for the globe
         if self.globe_rotation_angle > math.pi * 2:
             self.globe_rotation_angle = 0
-
-        # <-- AÑADIDO: ACTUALIZACIÓN DEL GLOBO ASCII -->
-        self.ascii_globe.update(angle_x=0.0, angle_y=self.globe_rotation_angle)
 
         # Anima los planetas a diferentes velocidades
         self.planet_angles[0] += 0.010 # Mercurio
@@ -858,19 +816,10 @@ class SentinelApp:
         """
         self.screen.fill(COLOR_BLACK)
 
-        if self.module_manager and self.module_manager.current_screen:
+        if self.module_manager:
             self.module_manager.render(self.screen)
         else:
-            if self.current_screen == "camera":
-                self.draw_camera_view()
-            elif self.current_screen == "radar":
-                self.draw_radar_view()
-            elif self.current_screen == "neo_tracker":
-                self.draw_neo_tracker_screen()
-            elif self.current_screen == "eonet_globe":
-                self.draw_eonet_globe_screen()
-            else:
-                self.draw_camera_view()
+            self._draw_placeholder()
 
         # Dibuja el header encima de todo, si está habilitado
         if config.CONFIG.get('show_header', True):
@@ -878,15 +827,10 @@ class SentinelApp:
 
         pygame.display.flip()
 
-    def draw_camera_view(self):
-        self.draw_video_feed()
-        if self.show_zoom_grid: self.draw_zoom_grid()
-        self.draw_bounding_boxes()
-        self.draw_status_panel()
-
-    def draw_radar_view(self):
-        self.draw_map()
-        self.draw_flight_info_panel()
+    def _draw_placeholder(self):
+        message = "MODULE MANAGER OFFLINE"
+        surface = self.font_large.render(message, True, self.current_theme_color)
+        self.screen.blit(surface, surface.get_rect(center=self.screen.get_rect().center))
 
     def draw_header(self):
         margins = config.CONFIG['margins']
@@ -923,657 +867,6 @@ class SentinelApp:
             header_rect.height - 12
         )
         draw_diagonal_pattern(self.screen, color, pattern_rect, -45, 8, 4, phase=self.pattern_phase)
-
-    def draw_video_feed(self):
-        with self.data_lock:
-            if self.current_video_frame: self.screen.blit(self.current_video_frame, self.main_area_rect.topleft)
-            else:
-                placeholder_text = self.font_medium.render("VIDEO FEED OFFLINE", True, self.current_theme_color)
-                self.screen.blit(placeholder_text, placeholder_text.get_rect(center=self.main_area_rect.center))
-        pygame.draw.rect(self.screen, self.current_theme_color, self.main_area_rect, 2)
-
-    def draw_zoom_grid(self):
-        grid_surface = pygame.Surface(self.main_area_rect.size, pygame.SRCALPHA)
-        
-        if self.alert_level == "warning": patterns = self.patterns_orange
-        elif self.alert_level == "danger": patterns = self.patterns_red
-        else: patterns = self.patterns_green
-
-        grid_color = self.current_theme_color + (160,)
-
-        with self.data_lock:
-            for r, row in enumerate(self.zoom_grid_map):
-                for c, p_type in enumerate(row):
-                    pos = (c * self.grid_cell_size, r * self.grid_cell_size)
-                    if p_type == 1: grid_surface.blit(patterns['dots'], pos)
-                    elif p_type == 2: grid_surface.blit(patterns['lines'], pos)
-        
-        for x in range(0, self.main_area_rect.width, self.grid_cell_size): pygame.draw.line(grid_surface, grid_color, (x, 0), (x, self.main_area_rect.height), 1)
-        for y in range(0, self.main_area_rect.height, self.grid_cell_size): pygame.draw.line(grid_surface, grid_color, (0, y), (self.main_area_rect.width, y), 1)
-        self.screen.blit(grid_surface, self.main_area_rect.topleft)
-
-    def draw_bounding_boxes(self):
-        with self.data_lock:
-            if not self.active_detections: return
-            z_rect = self.current_zoom_rect
-            if z_rect.w == 0 or z_rect.h == 0: return
-            for detection in self.active_detections.values():
-                box = detection.get('box')
-                if not box: continue
-                box_x_rel, box_y_rel = box[0] - z_rect.x, box[1] - z_rect.y
-                scale_x, scale_y = self.main_area_rect.width / z_rect.w, self.main_area_rect.height / z_rect.h
-                x1, y1, w, h = box_x_rel * scale_x, box_y_rel * scale_y, (box[2] - box[0]) * scale_x, (box[3] - box[1]) * scale_y
-                box_rect = pygame.Rect(self.main_area_rect.x + x1, self.main_area_rect.y + y1, w, h)
-                clipped_box = box_rect.clip(self.main_area_rect)
-                if clipped_box.width > 0 and clipped_box.height > 0:
-                    pygame.draw.rect(self.screen, self.current_theme_color, clipped_box, 1)
-                    label, score = detection.get('label', ''), detection.get('score', 0)
-                    label_surface = self.font_small.render(f"{label.upper()} [{score:.0%}]", True, self.current_theme_color)
-                    label_pos_y = box_rect.y - 18
-                    if label_pos_y < self.main_area_rect.y: label_pos_y = clipped_box.y + 2
-                    self.screen.blit(label_surface, (clipped_box.x + 2, label_pos_y))
-    
-    def draw_map(self):
-        with self.data_lock:
-            if self.map_surface:
-                self.screen.set_clip(self.map_area_rect)
-                self.screen.blit(self.map_surface, (self.map_area_rect.x + self.map_tile_offset[0], self.map_area_rect.y + self.map_tile_offset[1]))
-                self.draw_map_overlays() 
-                self.screen.set_clip(None)
-            else:
-                placeholder_text = self.font_medium.render(self.map_status, True, self.current_theme_color)
-                self.screen.blit(placeholder_text, placeholder_text.get_rect(center=self.map_area_rect.center))
-        pygame.draw.rect(self.screen, self.current_theme_color, self.map_area_rect, 2)
-
-    def get_screen_pos_from_coords(self, lat, lon):
-        """Converts lat/lon coordinates to a screen position."""
-        zoom = self.map_zoom_level
-        center_tile_x, center_tile_y = self.map_center_tile
-        offset_x, offset_y = self.map_tile_offset
-        
-        flight_tile_x, flight_tile_y = deg2num(lat, lon, zoom)
-        flight_frac_x = (lon + 180.0) / 360.0 * (2**zoom) - flight_tile_x
-        flight_frac_y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * (2**zoom) - flight_tile_y
-        
-        flight_pixel_x_in_tile, flight_pixel_y_in_tile = flight_frac_x * 256, flight_frac_y * 256
-        tile_diff_x = (flight_tile_x - (center_tile_x - self.map_width_tiles // 2)) * 256
-        tile_diff_y = (flight_tile_y - (center_tile_y - self.map_height_tiles // 2)) * 256
-        
-        map_surf_x, map_surf_y = tile_diff_x + flight_pixel_x_in_tile, tile_diff_y + flight_pixel_y_in_tile
-        screen_x, screen_y = self.map_area_rect.x + offset_x + map_surf_x, self.map_area_rect.y + offset_y + map_surf_y
-        return screen_x, screen_y
-
-    def draw_map_overlays(self):
-        """
-        Render radar/map overlays on the map area including range rings, optional radial lines and labels, the configured home/base marker, aircraft markers (highlighting the closest), and a dashed line with distance label to the closest flight.
-        
-        This method:
-        - Draws concentric distance rings centered on the configured map latitude/longitude using the configured map radius and map_distance_rings.
-        - Optionally draws radial sector lines and cardinal/intermediate direction labels when `map_radial_lines` is enabled in configuration.
-        - Renders a boxed home/base marker at the configured coordinates if it lies inside the visible map area.
-        - Renders each active flight as a rotated triangular marker, visually highlighting the closest flight and drawing a selection rectangle around it.
-        - If a closest flight is present and visible, draws a dashed connector from home to the flight and renders the midpoint distance label.
-        
-        Notes:
-        - Overlays are drawn onto `self.screen` and constrained by `self.map_area_rect` / `self.visible_map_rect`.
-        - Several appearance and behavior aspects are driven by configuration keys such as `map_latitude`, `map_longitude`, `map_radius_m`, and `map_distance_rings`.
-        """
-        home_pos = self.get_screen_pos_from_coords(config.CONFIG['map_latitude'], config.CONFIG['map_longitude'])
-        
-        pixels_per_meter = (self.visible_map_rect.width / 2) / config.CONFIG['map_radius_m']
-        num_rings = config.CONFIG.get("map_distance_rings", 3)
-        radius_step_m = config.CONFIG['map_radius_m'] / num_rings
-        max_radius_px = int(config.CONFIG['map_radius_m'] * pixels_per_meter)
-
-        panel_surface = pygame.Surface(self.map_area_rect.size, pygame.SRCALPHA)
-        panel_surface.fill((0, 0, 0, 120)) 
-        pygame.draw.rect(panel_surface, self.theme_colors['default'], panel_surface.get_rect(), 1)
-        self.screen.blit(panel_surface, self.map_area_rect.topleft)
-        
-        if config.CONFIG.get("map_radial_lines", False):
-            # --- CORRECCIÓN PARA EL ORDEN DEL RADAR ---
-            cardinal_points = {"N": 0, "NE": 45, "E": 90, "SE": 135, "S": 180, "SW": 225, "W": 270, "NW": 315}
-            intermediate_points = {"NNE": 22.5, "ENE": 67.5, "ESE": 112.5, "SSE": 157.5, "SSW": 202.5, "WSW": 247.5, "WNW": 292.5, "NNW": 337.5}
-            
-            # Unimos y ordenamos los puntos por su ángulo para asegurar el orden de dibujo
-            all_points_sorted = sorted((cardinal_points | intermediate_points).items(), key=lambda item: item[1])
-            cardinal_points_sorted = sorted(cardinal_points.items(), key=lambda item: item[1])
-            intermediate_points_sorted = sorted(intermediate_points.items(), key=lambda item: item[1])
-
-            line_start_radius = 20
-            start_radius_inter = max_radius_px - (radius_step_m * pixels_per_meter)
-            
-            # Dibujar las líneas de los sectores (hasta el penúltimo anillo)
-            for _, angle in cardinal_points_sorted:
-                line_angle_rad = math.radians(angle - 90 - 22.5)
-                start_x, start_y = home_pos[0] + line_start_radius * math.cos(line_angle_rad), home_pos[1] + line_start_radius * math.sin(line_angle_rad)
-                end_x, end_y = home_pos[0] + start_radius_inter * math.cos(line_angle_rad), home_pos[1] + start_radius_inter * math.sin(line_angle_rad)
-                pygame.draw.line(self.screen, COLOR_RING, (start_x, start_y), (end_x, end_y), 1)
-
-            # Dibujar las líneas exteriores (desde el penúltimo al último anillo)
-            for _, angle in all_points_sorted:
-                line_angle_rad = math.radians(angle - 90 - 11.25)
-                start_x, start_y = home_pos[0] + start_radius_inter * math.cos(line_angle_rad), home_pos[1] + start_radius_inter * math.sin(line_angle_rad)
-                end_x, end_y = home_pos[0] + max_radius_px * math.cos(line_angle_rad), home_pos[1] + max_radius_px * math.sin(line_angle_rad)
-                pygame.draw.line(self.screen, COLOR_RING, (start_x, start_y), (end_x, end_y), 1)
-
-            # Dibujar las etiquetas de texto
-            for label, angle in cardinal_points_sorted:
-                label_angle_rad = math.radians(angle - 90)
-                label_surf = self.font_small.render(label, True, COLOR_RING)
-                label_pos = (home_pos[0] + (max_radius_px + 15) * math.cos(label_angle_rad), home_pos[1] + (max_radius_px + 15) * math.sin(label_angle_rad))
-                label_rect = label_surf.get_rect(center=label_pos)
-                label_rect.clamp_ip(self.visible_map_rect) 
-                self.screen.blit(label_surf, label_rect)
-            
-            for label, angle in intermediate_points_sorted:
-                label_angle_rad = math.radians(angle - 90)
-                label_surf = self.font_tiny.render(label, True, COLOR_RING)
-                label_pos = (home_pos[0] + (max_radius_px + 15) * math.cos(label_angle_rad), home_pos[1] + (max_radius_px + 15) * math.sin(label_angle_rad))
-                label_rect = label_surf.get_rect(center=label_pos)
-                label_rect.clamp_ip(self.visible_map_rect)
-                self.screen.blit(label_surf, label_rect)
-
-
-        for i in range(1, num_rings + 1):
-            dist_m = i * radius_step_m
-            radius_px = int(dist_m * pixels_per_meter)
-            pygame.draw.circle(self.screen, COLOR_RING, (int(home_pos[0]), int(home_pos[1])), radius_px, 1)
-            dist_km = dist_m / 1000
-            label_text = f"{dist_km:.0f}km"
-            label_surf = self.font_small.render(label_text, True, COLOR_RING)
-            self.screen.blit(label_surf, (home_pos[0] + radius_px - label_surf.get_width() - 5, home_pos[1] - 15))
-
-        if self.map_area_rect.collidepoint(home_pos):
-            size = 8
-            home_rect = pygame.Rect(home_pos[0] - size, home_pos[1] - size, size * 2, size * 2)
-            pygame.draw.rect(self.screen, self.theme_colors['default'], home_rect, 1)
-            pygame.draw.line(self.screen, self.theme_colors['default'], (home_rect.left, home_rect.centery), (home_rect.right, home_rect.centery), 1)
-            pygame.draw.line(self.screen, self.theme_colors['default'], (home_rect.centerx, home_rect.top), (home_rect.centerx, home_rect.bottom), 1)
-
-        closest_flight_pos = None
-        for flight in self.active_flights:
-            screen_pos = self.get_screen_pos_from_coords(flight.get('latitude'), flight.get('longitude'))
-            if self.map_area_rect.collidepoint(screen_pos):
-                is_closest = (flight == self.closest_flight)
-                plane_size, color = (12, COLOR_YELLOW) if is_closest else (8, self.theme_colors['default'])
-                angle = math.radians(flight.get('track', 0) - 90)
-                cos_a, sin_a = math.cos(angle), math.sin(angle)
-                points = [(-plane_size, -plane_size//2), (plane_size, 0), (-plane_size, plane_size//2)]
-                rotated_points = [(p[0] * cos_a - p[1] * sin_a + screen_pos[0], p[0] * sin_a + p[1] * cos_a + screen_pos[1]) for p in points]
-                pygame.draw.polygon(self.screen, color, rotated_points)
-                if is_closest:
-                    closest_flight_pos = screen_pos
-                    pygame.draw.rect(self.screen, COLOR_YELLOW, (screen_pos[0] - 15, screen_pos[1] - 15, 30, 30), 1)
-
-        if closest_flight_pos and self.map_area_rect.collidepoint(home_pos):
-            draw_dashed_line(self.screen, COLOR_YELLOW, home_pos, closest_flight_pos, dash_length=8)
-            dist_text = f"{self.closest_flight.get('distance_km', 0):.1f} km"
-            dist_surf = self.font_small.render(dist_text, True, COLOR_YELLOW)
-            mid_point = ((home_pos[0] + closest_flight_pos[0]) / 2, (home_pos[1] + closest_flight_pos[1]) / 2)
-            dist_rect = dist_surf.get_rect(center=mid_point)
-            self.screen.blit(dist_surf, dist_rect)
-
-    def draw_flight_info_panel(self):
-        """
-        Render the "Closest Aircraft" information panel and blit it to the configured flight panel area.
-        
-        Renders a semi-transparent panel showing either a "NO TARGETS" message or details for the currently tracked closest flight (callsign, model, altitude, speed, heading, and route). If a flight photo is available it is scaled and displayed at the bottom of the panel; otherwise a "NO IMAGE DATA" placeholder box is shown. The panel border, text, and divider lines use the app's theme colors and the finished surface is blitted to self.flight_panel_rect on the main screen.
-        """
-        panel_surface = pygame.Surface(self.flight_panel_rect.size, pygame.SRCALPHA)
-        panel_surface.fill((0, 0, 0, 180)) 
-        pygame.draw.rect(panel_surface, self.theme_colors['default'], panel_surface.get_rect(), 1)
-        
-        title_surf = self.font_medium.render("CLOSEST AIRCRAFT", True, COLOR_YELLOW)
-        panel_surface.blit(title_surf, (10, 10))
-        pygame.draw.line(panel_surface, self.theme_colors['default'], (10, 35), (self.flight_panel_rect.width - 10, 35), 1)
-
-        y_offset = 45
-        with self.data_lock: flight, photo = self.closest_flight, self.closest_flight_photo_surface
-        
-        if not flight:
-            panel_surface.blit(self.font_small.render("> NO TARGETS...", True, self.theme_colors['default']), (10, y_offset))
-        else:
-            details = {
-                "CALLSIGN:": flight.get('callsign', 'N/A').upper(), "MODEL:": flight.get('model', 'N/A'),
-                "ALTITUDE:": f"{flight.get('altitude', 0)} FT", "SPEED:": f"{flight.get('speed', 0)} KTS",
-                "HEADING:": f"{flight.get('track', 0)}°"
-            }
-            for label, value in details.items():
-                panel_surface.blit(self.font_small.render(label, True, self.theme_colors['default']), (10, y_offset))
-                panel_surface.blit(self.font_medium.render(value, True, COLOR_WHITE), (10, y_offset + 14))
-                y_offset += 36
-            
-            pygame.draw.line(panel_surface, self.theme_colors['default'], (10, y_offset), (self.flight_panel_rect.width - 10, y_offset), 1)
-            y_offset += 8
-            panel_surface.blit(self.font_small.render("ROUTE:", True, self.theme_colors['default']), (10, y_offset))
-            route_text = f"{flight.get('airport_origin_code', 'N/A')} > {flight.get('airport_destination_code', 'N/A')}"
-            panel_surface.blit(self.font_medium.render(route_text, True, COLOR_WHITE), (10, y_offset + 14))
-            
-            if photo:
-                panel_w = self.flight_panel_rect.width - 20 
-                photo_h = int(panel_w / (photo.get_width() / photo.get_height()))
-                photo_rect = pygame.Rect(10, self.flight_panel_rect.height - photo_h - 10, panel_w, photo_h)
-                scaled_photo = pygame.transform.scale(photo, photo_rect.size)
-                panel_surface.blit(scaled_photo, photo_rect)
-                pygame.draw.rect(panel_surface, self.theme_colors['default'], photo_rect, 1)
-            else:
-                photo_rect = pygame.Rect(10, self.flight_panel_rect.height - 80 - 10, self.flight_panel_rect.width - 20, 80)
-                no_img_surf = self.font_small.render("NO IMAGE DATA", True, self.theme_colors['default'])
-                panel_surface.blit(no_img_surf, no_img_surf.get_rect(center=photo_rect.center))
-                pygame.draw.rect(panel_surface, self.theme_colors['default'], photo_rect, 1)
-
-        self.screen.blit(panel_surface, self.flight_panel_rect.topleft)
-
-    def draw_status_panel(self):
-        color = self.current_theme_color
-        pygame.draw.rect(self.screen, color, self.status_panel_rect, 2)
-        y_offset, row_h = self.col1_rect.y + 2, 14
-        texts = [
-            ("MQTT LINK:", self.mqtt_status), ("VIDEO FEED:", self.video_status), ("CAMERA:", config.CONFIG['camera_name'].upper()),
-            ("LAST EVENT:", self.last_event_time), ("TARGET:", self.target_label), ("CONFIDENCE:", self.target_score)
-        ]
-        for i, (label, value) in enumerate(texts):
-            y_pos = y_offset + (i * row_h)
-
-            label_surface = self.font_small.render(label, True, color)
-            label_rect = label_surface.get_rect()
-            
-            value_surface = self.font_small.render(str(value), True, COLOR_WHITE)
-            value_rect = value_surface.get_rect()
-
-            label_rect.topleft = (self.col1_rect.x, y_pos)
-            value_rect.topright = (self.col1_rect.right, y_pos)
-
-            line_y = label_rect.centery
-            start_x = label_rect.right + 4
-            end_x = value_rect.left - 4
-
-            if start_x < end_x:
-                start_pos = (start_x, line_y)
-                end_pos = (end_x, line_y)
-                draw_dashed_line(self.screen, color, start_pos, end_pos, 1, 2)
-            
-            self.screen.blit(label_surface, label_rect)
-            self.screen.blit(value_surface, value_rect)
-            
-        with self.data_lock:
-            if self.snapshot_surface:
-                self.screen.blit(self.snapshot_surface, self.col2_rect)
-                self.draw_snapshot_scanner()
-            else:
-                no_signal_surf = self.font_small.render("NO SIGNAL", True, color)
-                self.screen.blit(no_signal_surf, no_signal_surf.get_rect(center=self.col2_rect.center))
-        pygame.draw.rect(self.screen, color, self.col2_rect, 1)
-
-        scan_text = "> SCANNING FOR TARGETS"
-        if int(time.time() * 2) % 2 == 0: scan_text += "_" 
-        self.screen.blit(self.font_small.render(scan_text, True, color), (self.col3_rect.x, self.col3_rect.y))
-        self.draw_analysis_graph()
-
-    def draw_snapshot_scanner(self):
-        scanner_surface = pygame.Surface(self.col2_rect.size, pygame.SRCALPHA)
-        trail_color = self.current_theme_color + (25,) # Dynamic trail color
-        
-        trail_width = 20
-        if self.scanner_dir > 0: trail_rect = pygame.Rect(self.scanner_pos - trail_width, 0, trail_width, self.col2_rect.height)
-        else: trail_rect = pygame.Rect(self.scanner_pos, 0, trail_width, self.col2_rect.height)
-        
-        scanner_surface.fill(trail_color, trail_rect)
-        pygame.draw.line(scanner_surface, self.current_theme_color, (self.scanner_pos, 0), (self.scanner_pos, self.col2_rect.height), 2)
-        self.screen.blit(scanner_surface, self.col2_rect.topleft)
-
-    def draw_analysis_graph(self):
-        graph_rect = self.analysis_graph_rect
-        color = self.current_theme_color
-        
-        grid_surface = pygame.Surface(graph_rect.size, pygame.SRCALPHA)
-        cell_size = 10
-        for x in range(0, graph_rect.width, cell_size): pygame.draw.line(grid_surface, color + (100,), (x, 0), (x, graph_rect.height), 1)
-        for y in range(0, graph_rect.height, cell_size): pygame.draw.line(grid_surface, color + (100,), (0, y), (graph_rect.width, y), 1)
-        self.screen.blit(grid_surface, graph_rect.topleft)
-        pygame.draw.rect(self.screen, color, graph_rect, 1)
-        
-        points = []
-        with self.data_lock:
-            for i, y in enumerate(self.graph_data): points.append((graph_rect.x + i, graph_rect.y + y))
-        if len(points) > 1: pygame.draw.lines(self.screen, color, False, points, 1)
-
-    def draw_neo_tracker_screen(self):
-        """
-        Draws the NEO tracker screen with a central sphere, top-left HUD,
-        and a bottom-right solar system mini-map.
-        """
-        # Obtiene los datos una vez para usarlos en todas las funciones
-        neo_data = self.neo_tracker.get_closest_neo_data()
-        
-        # 1. Dibuja el elemento central: la esfera pseudo-3D y su trayectoria
-        sphere_center_x = self.screen.get_width() // 2
-        sphere_center_y = self.screen.get_height() // 2 + 20 # Un poco más arriba para no chocar con el mini-mapa
-        sphere_radius = 120
-        self.draw_vector_sphere(sphere_center_x, sphere_center_y, sphere_radius, self.current_theme_color, self.sphere_rotation_angle)
-        self.draw_asteroid_trajectory(sphere_center_x, sphere_center_y, sphere_radius, neo_data, self.current_theme_color)
-        
-        # 2. Dibuja la información de texto en la esquina superior izquierda
-        self.draw_neo_hud(neo_data)
-        
-        # 3. Dibuja el nuevo mini-mapa en la esquina inferior derecha
-        self.draw_solar_system_map(neo_data)
-    
-    def draw_vector_sphere(self, x, y, radius, color, rotation_angle):
-        """Draws a rotating pseudo-3D wireframe sphere."""
-        # Dibuja las líneas de longitud (elipses verticales)
-        num_long_lines = 12
-        for i in range(num_long_lines):
-            angle = (i / num_long_lines) * math.pi + rotation_angle
-            
-            # El coseno hace que las elipses se achaten en los bordes, simulando una esfera
-            ellipse_width = abs(int(radius * 2 * math.cos(angle)))
-            
-            if ellipse_width > 2: # Solo dibuja las que son visibles
-                rect = pygame.Rect(x - ellipse_width // 2, y - radius, ellipse_width, radius * 2)
-                pygame.draw.ellipse(self.screen, color, rect, 1)
-
-        # Dibuja las líneas de latitud (elipses horizontales)
-        num_lat_lines = 7
-        for i in range(1, num_lat_lines):
-            lat_y = y - radius + (i * (radius * 2) / num_lat_lines)
-            
-            # El cálculo de la anchura simula la curvatura de la esfera
-            dist_from_center = abs(y - lat_y)
-            width_factor = math.sqrt(radius**2 - dist_from_center**2) / radius
-            ellipse_width = int(radius * 2 * width_factor)
-            
-            rect = pygame.Rect(x - ellipse_width // 2, lat_y - 2, ellipse_width, 4)
-            pygame.draw.ellipse(self.screen, color, rect, 1)
-
-    # ==============================================================================
-    # == NUEVAS FUNCIONES Y MODIFICACIONES PARA EONET
-    # ==============================================================================
-
-    def draw_eonet_globe_screen(self):
-        """Dibuja el globo de EONET con etiquetas proyectadas radialmente."""
-        color = self.current_theme_color
-        
-        globe_center_x = self.globe_center_x
-        globe_center_y = self.globe_center_y
-        globe_radius = self.globe_radius
-        events = self.eonet_tracker.get_events()
-
-        self.ascii_globe.draw(self.screen, self.font_tiny, color)
-        
-        if events:
-            for i, event in enumerate(events, 1):
-                if not event['coordinates'] or len(event['coordinates']) != 2:
-                    continue
-
-                lon, lat = event['coordinates']
-
-                # <-- CORRECCIÓN: Revertimos la rotación a '+' para que coincida con el nuevo eje Z
-                lon_rad = math.radians(lon) + self.globe_rotation_angle
-                
-                lat_rad = math.radians(lat)
-                
-                x3d = math.cos(lat_rad) * math.cos(lon_rad)
-                y3d = math.sin(lat_rad)
-                # <-- CORRECCIÓN: Negamos Z aquí también para sincronizarlo con el globo
-                z3d = -math.cos(lat_rad) * math.sin(lon_rad)
-                
-                if z3d > -0.1:
-                    screen_x = int(globe_center_x + globe_radius * x3d)
-                    screen_y = int(globe_center_y - globe_radius * y3d)
-                    
-                    dx = screen_x - globe_center_x
-                    dy = screen_y - globe_center_y
-                    dist = math.hypot(dx, dy)
-                    if dist == 0: continue
-
-                    projection_dist = 40
-                    end_line_x = screen_x + (dx / dist) * projection_dist
-                    end_line_y = screen_y + (dy / dist) * projection_dist
-
-                    tag_topleft = self.get_hud_tag_topleft((end_line_x, end_line_y), str(i))
-                    self.draw_hud_tag(self.screen, tag_topleft, str(i), color)
-
-                    draw_dashed_line(self.screen, color, (screen_x, screen_y), (end_line_x, end_line_y))
-                    
-                    alpha = int(100 + 155 * (z3d if z3d > 0 else 0))
-                    pygame.draw.circle(self.screen, COLOR_YELLOW + (alpha,), (screen_x, screen_y), 4)
-
-        self.draw_eonet_hud(events)
-
-    def get_hud_tag_topleft(self, center_pos, text):
-        """Calcula la posición topleft de una etiqueta para que quede centrada en center_pos."""
-        text_surf = self.font_tiny.render(text, True, COLOR_WHITE)
-        padding = 4
-        tag_width = text_surf.get_width() + padding * 2
-        tag_height = text_surf.get_height() + padding * 2
-        return (center_pos[0] - tag_width / 2, center_pos[1] - tag_height / 2)
-
-    def draw_hud_tag(self, surface, topleft_pos, text, color):
-        """Dibuja una etiqueta numerada en una posición absoluta y devuelve su Rect."""
-        text_surf = self.font_tiny.render(text, True, COLOR_WHITE)
-        padding = 4
-        bg_rect = pygame.Rect(
-            topleft_pos[0], 
-            topleft_pos[1],
-            text_surf.get_width() + padding * 2,
-            text_surf.get_height() + padding * 2
-        )
-        bg_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
-        bg_surf.fill((0, 0, 0, 180))
-        surface.blit(bg_surf, bg_rect.topleft)
-        pygame.draw.rect(surface, color, bg_rect, 1)
-        surface.blit(text_surf, text_surf.get_rect(center=bg_rect.center).topleft)
-        return bg_rect
-
-    def draw_eonet_hud(self, events):
-        """
-        Render the textual HUD for the EONET globe screen in the left margin.
-        
-        Displays a header and either a scanning status or a numbered list of up to 8 recent global events. For each event the HUD shows a numbered box, an uppercase category tag, and the event title (truncated with an ellipsis if longer than 35 characters). If an event's category is "Wildfires" or "Severe Storms", the category tag is rendered using the theme's warning color; all other text uses the standard colors from the current theme.
-        
-        Parameters:
-            events (list[dict]): A list of event objects. Each event should contain at least:
-                - 'category' (str): the event category name.
-                - 'title' (str): the event title to display.
-        
-        """
-        margins = config.CONFIG['margins']
-        x_offset = margins['left'] + 10
-        y_offset = margins['top'] + 45
-
-        title_surf = self.font_large.render("// GLOBAL EVENT MONITOR //", True, self.current_theme_color)
-        self.screen.blit(title_surf, (x_offset, y_offset))
-        y_offset += 30
-
-        if not events:
-            status_surf = self.font_medium.render("...SCANNING FOR GLOBAL EVENTS...", True, self.current_theme_color)
-            self.screen.blit(status_surf, (x_offset, y_offset))
-            return
-        
-        max_events_to_show = 8
-        line_height = 20
-        
-        for i, event in enumerate(events[:max_events_to_show], 1):
-            number_box_size = 22
-            box_rect = pygame.Rect(x_offset, y_offset, number_box_size, number_box_size)
-            pygame.draw.rect(self.screen, self.current_theme_color, box_rect, 1)
-            
-            num_surf = self.font_small.render(str(i), True, COLOR_WHITE)
-            self.screen.blit(num_surf, num_surf.get_rect(center=box_rect.center).topleft)
-            
-            text_x_offset = x_offset + number_box_size + 8
-
-            category_color = self.theme_colors['warning'] if event['category'] in ['Wildfires', 'Severe Storms'] else COLOR_WHITE
-            
-            cat_surf = self.font_small.render(f"[{event['category'].upper()}]", True, category_color)
-            self.screen.blit(cat_surf, (text_x_offset, y_offset))
-            
-            title_text = event['title']
-            if len(title_text) > 35:
-                title_text = title_text[:32] + "..."
-            title_surf = self.font_medium.render(title_text, True, COLOR_WHITE)
-            self.screen.blit(title_surf, (text_x_offset, y_offset + line_height))
-
-            y_offset += line_height * 2.5
-            if y_offset > self.screen.get_height() - 50:
-                break
-
-    # ==============================================================================
-    # == FIN DE LAS MODIFICACIONES
-    # ==============================================================================
-
-    def draw_asteroid_trajectory(self, cx, cy, radius, neo_data, color):
-        """Draws a pseudo-3D trajectory line for the NEO."""
-        if not neo_data:
-            return
-
-        # Simula una trayectoria simple de izquierda a derecha
-        start_x, end_x = cx - radius * 2.5, cx + radius * 2.5
-        
-        # La altura de la trayectoria depende de la distancia de aproximación
-        # Normalizamos la distancia para que siempre se vea bien
-        miss_dist_km = neo_data.get('miss_distance_km', 1000000)
-        # Un valor más bajo significa que pasa más cerca. Lo escalamos para la pantalla.
-        pass_height = min(1.0, miss_dist_km / 5000000) * radius * 1.5
-        start_y, end_y = cy - radius, cy + pass_height
-
-        num_segments = 50
-        for i in range(num_segments):
-            # Interpola la posición del segmento
-            t = i / (num_segments - 1)
-            x1 = start_x + (end_x - start_x) * (i / num_segments)
-            y1 = start_y + (end_y - start_y) * (i / num_segments)
-            x2 = start_x + (end_x - start_x) * ((i + 1) / num_segments)
-            y2 = start_y + (end_y - start_y) * ((i + 1) / num_segments)
-
-            # --- El truco del Pseudo-3D ---
-            # Simula una coordenada Z: negativo detrás de la esfera, positivo delante
-            z = (x1 - cx) / (radius * 1.5) 
-            
-            is_behind = z**2 + ((y1 - cy)/radius)**2 < 1.1 # ¿Está el punto "detrás" del planeta?
-
-            if is_behind:
-                # Si está detrás, dibuja una línea punteada y más oscura
-                draw_dashed_line(self.screen, color + (100,), (x1, y1), (x2, y2), 1, 4)
-            else:
-                # Si está delante, el grosor y brillo dependen de Z
-                alpha = int(np.clip(100 + z * 155, 100, 255))
-                width = int(np.clip(1 + z * 2, 1, 3))
-                pygame.draw.line(self.screen, color + (alpha,), (x1, y1), (x2, y2), width)
-    
-    def draw_neo_hud(self, neo_data):
-        """
-        Render the NEO tracker HUD in the top-left column with concise threat and approach details.
-        
-        Parameters:
-            neo_data (dict | None): Object containing NEO information or None if unavailable. When present, expected keys:
-                - 'name' (str): Identifier of the NEO.
-                - 'diameter_m' (number): Estimated diameter in meters.
-                - 'velocity_kmh' (number): Relative velocity in kilometers per hour.
-                - 'approach_date' (str): Approach datetime string (date portion is displayed).
-                - 'miss_distance_km' (number): Closest approach distance in kilometers.
-                - 'is_hazardous' (bool): Hazard flag used to highlight assessment.
-        """
-        margins = config.CONFIG['margins']
-        x_offset = margins['left'] + 10
-        y_offset = margins['top'] + 45 # Debajo del header
-
-        title_surf = self.font_large.render("// DEEP SPACE THREAT ANALYSIS //", True, self.current_theme_color)
-        self.screen.blit(title_surf, (x_offset, y_offset))
-        y_offset += 30
-
-        if not neo_data:
-            status_surf = self.font_medium.render("...ACQUIRING TARGET DATA...", True, self.current_theme_color)
-            self.screen.blit(status_surf, (x_offset, y_offset))
-            return
-            
-        line_height = 18 # Un poco más compacto para que entre todo
-
-        # --- Lógica de una sola columna ---
-        is_hazardous = neo_data['is_hazardous']
-        assessment_text = "!!! POTENTIAL HAZARD !!!" if is_hazardous else "[ NOMINAL ]"
-        assessment_color = self.theme_colors['danger'] if is_hazardous else COLOR_WHITE
-
-        # Combinamos toda la info en una sola lista de tuplas (etiqueta, valor, color_valor)
-        info_lines = [
-            ("ID:", neo_data['name'], COLOR_WHITE),
-            ("DIAMETER:", f"~{neo_data['diameter_m']} METERS", COLOR_WHITE),
-            ("VELOCITY:", f"{neo_data['velocity_kmh']:,} KM/H", COLOR_WHITE),
-            ("APPROACH:", neo_data['approach_date'].split(" ")[0], COLOR_WHITE),
-            ("MISS DISTANCE:", f"{neo_data['miss_distance_km']:,} KM", COLOR_WHITE),
-            ("ASSESSMENT:", assessment_text, assessment_color)
-        ]
-
-        for label, value, value_color in info_lines:
-            label_surf = self.font_small.render(label, True, self.current_theme_color)
-            value_surf = self.font_medium.render(value, True, value_color)
-            
-            self.screen.blit(label_surf, (x_offset, y_offset))
-            y_offset += line_height
-            self.screen.blit(value_surf, (x_offset, y_offset))
-            y_offset += line_height * 1.5 # Espacio extra entre pares de datos
-    
-    def draw_solar_system_map(self, neo_data):
-        """
-        Render a compact schematic solar system mini-map in the bottom-right corner of the screen.
-        
-        Renders a framed mini-map showing the Sun, scaled orbital rings, planet markers, and a stylized asteroid trajectory. When NEO data is provided, the asteroid path and current asteroid marker are drawn; the NEO's miss distance adjusts the trajectory's proximity to the planetary orbits and the marker color reflects hazard status.
-        
-        Parameters:
-            neo_data (dict | None): Near-Earth object information used to plot the asteroid path. Expected keys:
-                - 'miss_distance_km' (numeric): Distance in kilometers used to scale the trajectory's closeness to the orbits.
-                - 'is_hazardous' (bool): If true, the asteroid marker is rendered using the danger theme color; otherwise a neutral color is used.
-        """
-        # Define el área para nuestro "mini-mapa"
-        map_rect = pygame.Rect(400, 280, 220, 180) # Posición y tamaño en la esquina inferior derecha
-        center_x, center_y = map_rect.centerx, map_rect.centery
-        max_radius = map_rect.width // 2 - 10 # El radio máximo es ahora mucho más pequeño
-
-        # Dibuja un recuadro para el mini-mapa
-        pygame.draw.rect(self.screen, self.current_theme_color, map_rect, 1)
-        map_title_surf = self.font_small.render("SYSTEM NAV-MAP", True, self.current_theme_color)
-        self.screen.blit(map_title_surf, (map_rect.x + 5, map_rect.y + 2))
-        
-        # Dibuja el Sol
-        pygame.draw.circle(self.screen, COLOR_YELLOW, (center_x, center_y), 5)
-
-        # Dibuja órbitas y planetas (escalados al nuevo tamaño)
-        orbit_radii = [max_radius * 0.3, max_radius * 0.5, max_radius * 0.75, max_radius * 0.95]
-        planet_colors = [(165, 42, 42), (210, 180, 140), (0, 120, 255), (255, 69, 0)]
-        for i, radius in enumerate(orbit_radii):
-            pygame.draw.circle(self.screen, self.current_theme_color + (40,), (center_x, center_y), int(radius), 1)
-            planet_x = center_x + radius * math.cos(self.planet_angles[i])
-            planet_y = center_y + radius * math.sin(self.planet_angles[i])
-            pygame.draw.circle(self.screen, planet_colors[i], (int(planet_x), int(planet_y)), 2)
-
-        # Dibuja la trayectoria del asteroide (recalculada para el mini-mapa)
-        if not neo_data:
-            return
-
-        miss_dist_km = neo_data.get('miss_distance_km', 5000000)
-        closeness_factor = np.clip(1.0 - (miss_dist_km / 10000000), 0.1, 0.9)
-        earth_orbit_radius = orbit_radii[2]
-
-        # Puntos de la curva relativos al nuevo mapa
-        p0 = (map_rect.left, map_rect.top + 20)
-        p1 = (center_x + earth_orbit_radius * closeness_factor, center_y + 10)
-        p2 = (map_rect.right - 10, map_rect.bottom)
-        
-        path_points = []
-        for t_step in np.linspace(0, 1, 30): # Menos segmentos para un mapa más pequeño
-            x = (1 - t_step)**2 * p0[0] + 2 * (1 - t_step) * t_step * p1[0] + t_step**2 * p2[0]
-            y = (1 - t_step)**2 * p0[1] + 2 * (1 - t_step) * t_step * p1[1] + t_step**2 * p2[1]
-            path_points.append((x, y))
-        pygame.draw.lines(self.screen, self.current_theme_color + (80,), False, path_points, 1)
-
-        t = self.asteroid_path_progress
-        ast_x = (1 - t)**2 * p0[0] + 2 * (1 - t) * t * p1[0] + t**2 * p2[0]
-        ast_y = (1 - t)**2 * p0[1] + 2 * (1 - t) * t * p1[1] + t**2 * p2[1]
-        
-        ast_color = self.theme_colors['danger'] if neo_data['is_hazardous'] else COLOR_YELLOW
-        pygame.draw.circle(self.screen, ast_color, (int(ast_x), int(ast_y)), 2) # Un simple círculo para el asteroide
 
 if __name__ == '__main__':
     app = SentinelApp()
