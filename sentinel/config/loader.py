@@ -14,6 +14,18 @@ from .defaults import clone_defaults
 
 
 def _deep_update(base: MutableMapping[str, Any], updates: Mapping[str, Any]) -> MutableMapping[str, Any]:
+    """
+    Recursively merge mapping values from `updates` into `base`.
+    
+    Nested mappings are merged into corresponding nested mutable mappings in `base`; other values overwrite `base` entries. The `base` mapping is modified in place and also returned.
+    
+    Parameters:
+        base (MutableMapping[str, Any]): The mapping to update; mutated in place.
+        updates (Mapping[str, Any]): The mapping providing updates to apply.
+    
+    Returns:
+        MutableMapping[str, Any]: The same `base` mapping after applying the updates.
+    """
     for key, value in updates.items():
         if isinstance(value, Mapping) and isinstance(base.get(key), MutableMapping):
             _deep_update(base[key], value)  # type: ignore[index]
@@ -23,6 +35,18 @@ def _deep_update(base: MutableMapping[str, Any], updates: Mapping[str, Any]) -> 
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
+    """
+    Load a YAML file and return its top-level mapping as a dictionary.
+    
+    Parameters:
+        path (Path): Path to the YAML file to load.
+    
+    Returns:
+        dict: The parsed mapping from the YAML file. Returns an empty dict if the file does not exist or the document is empty.
+    
+    Raises:
+        ValueError: If the YAML document exists but is not a mapping.
+    """
     if not path.exists():
         return {}
     with path.open("r", encoding="utf8") as fh:
@@ -49,7 +73,20 @@ class ConfigurationBundle:
 
 
 def load_configuration(settings_dir: Optional[Path] = None) -> ConfigurationBundle:
-    """Load layered configuration for the Sentinel application."""
+    """
+    Load and merge layered configuration from defaults, YAML files in a settings directory, and optional user-provided overrides.
+    
+    Parameters:
+        settings_dir (Optional[Path]): Directory to load YAML configuration from. If not provided, resolved from the SENTINEL_SETTINGS_DIR environment variable or defaults to the package's "settings" directory.
+    
+    Returns:
+        ConfigurationBundle: Aggregated configuration containing:
+            - core: merged core settings
+            - modules: mapping of module name to ModuleSettings
+            - services: per-service configuration mappings
+            - priorities: merged priorities settings
+            - theme_colors: merged theme color settings
+    """
 
     root_dir = Path(__file__).resolve().parents[2]
     settings_dir = Path(
