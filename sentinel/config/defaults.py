@@ -94,7 +94,16 @@ DEFAULT_PRIORITIES = {
 
 
 def clone_defaults():
-    """Return deep copies of mutable default structures."""
+    """
+    Create deep copies of the module's default configuration structures.
+    
+    Returns:
+        tuple: (core_config, modules, priorities, theme_colors)
+            core_config (dict): Deep copy of DEFAULT_CORE_CONFIG.
+            modules (dict): Deep copy of DEFAULT_MODULES.
+            priorities (dict): Deep copy of DEFAULT_PRIORITIES.
+            theme_colors (dict): Deep copy of DEFAULT_THEME_COLORS.
+    """
 
     return (
         deepcopy(DEFAULT_CORE_CONFIG),
