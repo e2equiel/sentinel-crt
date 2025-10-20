@@ -879,7 +879,15 @@ class SentinelApp:
             pattern_width,
             header_rect.height - 12
         )
-        draw_diagonal_pattern(self.screen, color, pattern_rect, -45, 8, 4, phase=self.pattern_phase)
+        draw_diagonal_pattern(
+            self.screen,
+            color,
+            pattern_rect,
+            -45,
+            spacing=8,
+            line_width=4,
+            phase=self.pattern_phase,
+        )
 
 if __name__ == '__main__':
     app = SentinelApp()
