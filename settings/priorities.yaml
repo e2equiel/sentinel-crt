@@ -1,0 +1,23 @@
+# Declarative priority map for screen selection.
+# Adjust weights and idle cycle to fit your installation.
+
+timeout_seconds: 15
+idle:
+  cycle:
+    - camera
+    - neo_tracker
+    - eonet_globe
+  dwell_seconds: 20
+rules:
+  - when:
+      module: camera
+      state:
+        - danger
+        - warning
+    weight: 100
+    screen: camera
+  - when:
+      module: radar
+      state: air-traffic
+    weight: 80
+    screen: radar
