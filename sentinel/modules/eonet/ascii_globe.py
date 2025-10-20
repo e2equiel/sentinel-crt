@@ -1,18 +1,25 @@
-import pygame
-import numpy as np
 import math
+from importlib import resources
+from typing import Optional
+
+import numpy as np
+import pygame
 
 class ASCIIGlobe:
     """
     Maneja la creación, rotación y dibujo de un globo terráqueo en ASCII
     cargando la forma de los continentes desde un archivo de texto.
     """
-    def __init__(self, screen_width, screen_height, radius, center_pos, map_file):
+    def __init__(self, screen_width, screen_height, radius, center_pos, map_file: Optional[str] = None):
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.radius = radius
         self.center_x, self.center_y = center_pos
-        self.map_file = map_file
+        if map_file is None:
+            with resources.as_file(resources.files(__package__) / "assets" / "earth_W140_H35.txt") as default_path:
+                self.map_file = str(default_path)
+        else:
+            self.map_file = map_file
         
         # --- REFACTORIZADO: Una sola lista para todos los puntos ---
         # Cada elemento será una tupla: (vector_3d, caracter)
