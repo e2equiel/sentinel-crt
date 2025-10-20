@@ -12,6 +12,7 @@ from collections import deque
 import requests
 import io
 import math
+import traceback
 
 # Import configuration from the separate config file
 import config
@@ -196,6 +197,7 @@ class SentinelApp:
 
         self.module_manager = None
 
+        self.mqtt_client = None
         self.start_mqtt_client()
         self.video_thread = None
         self.video_thread_running = False
@@ -257,8 +259,9 @@ class SentinelApp:
         # 1. Stop background services
         print("INFO: Stopping background services...")
         # Stop MQTT client
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
+        if self.mqtt_client:
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
         print("INFO: MQTT client stopped.")
         
         # Stop video thread
@@ -401,9 +404,10 @@ class SentinelApp:
             self.mqtt_client.on_connect, self.mqtt_client.on_message, self.mqtt_client.on_disconnect = self.on_connect, self.on_message, self.on_disconnect
             self.mqtt_client.connect_async(config.CONFIG["mqtt_host"], config.CONFIG["mqtt_port"], 60)
             self.mqtt_client.loop_start()
-        except Exception as e: 
+        except Exception as e:
             print(f"Error starting MQTT client: {e}")
             self.mqtt_status = "ERROR"
+            self.mqtt_client = None
 
     def start_video_capture(self):
         """Starts the video capture thread."""
@@ -454,7 +458,10 @@ class SentinelApp:
             self.mqtt_status = "CONNECTED"
             client.subscribe(config.CONFIG["frigate_topic"])
             client.subscribe(config.CONFIG["flight_topic"])
-            client.subscribe(config.CONFIG["mqtt_restart_topic"])
+
+            restart_topic = config.CONFIG.get("mqtt_restart_topic")
+            if restart_topic:
+                client.subscribe(restart_topic)
         else:
             print(f"Failed to connect to MQTT, code: {reason_code}")
             self.mqtt_status = f"FAILED ({reason_code.value})"
@@ -585,31 +592,37 @@ class SentinelApp:
         
         Continuously processes input events, updates application state, and renders frames at the configured frame rate. Guarantees that shutdown() is called when the loop exits.
         """
+        exit_code = 0
         try:
             while self.running:
                 dt = self.clock.tick(self.core_settings.get("fps", 30)) / 1000.0
                 self.handle_events()
                 self.update(dt)
                 self.draw()
+        except KeyboardInterrupt:
+            print("INFO: Keyboard interrupt received. Exiting main loop.")
+            exit_code = 130
+        except Exception:
+            print("ERROR: Unhandled exception in main loop:")
+            traceback.print_exc()
+            exit_code = 1
         finally:
             self.shutdown()
+        return exit_code
 
     def shutdown(self):
-        """
-        Shuts down the application and terminates all background services.
-        
-        Stops and shuts down the module manager if present, stops the MQTT network loop and disconnects the client, quits Pygame, and exits the process.
-        
-        Raises:
-            SystemExit: terminates the running process.
-        """
+        """Shut down background services and release application resources."""
         print("Closing application...")
+        self.running = False
+        self.video_thread_running = False
+        if self.video_thread and self.video_thread.is_alive():
+            self.video_thread.join(timeout=5)
         if self.module_manager:
             self.module_manager.shutdown()
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
+        if self.mqtt_client:
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
         pygame.quit()
-        sys.exit()
 
     def handle_events(self):
         """
@@ -866,8 +879,16 @@ class SentinelApp:
             pattern_width,
             header_rect.height - 12
         )
-        draw_diagonal_pattern(self.screen, color, pattern_rect, -45, 8, 4, phase=self.pattern_phase)
+        draw_diagonal_pattern(
+            self.screen,
+            color,
+            pattern_rect,
+            -45,
+            spacing=8,
+            line_width=4,
+            phase=self.pattern_phase,
+        )
 
 if __name__ == '__main__':
     app = SentinelApp()
-    app.run()
+    sys.exit(app.run())
