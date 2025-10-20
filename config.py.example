@@ -32,6 +32,10 @@ CONFIG = {
     "mqtt_password": "your_mqtt_password",
     "frigate_topic": "frigate/events",
     "flight_topic": "flights/overhead",
+    # Optional: topic/payload that will trigger a hard reset of the UI.
+    # Leave the topic blank/None to disable the feature without editing code.
+    "mqtt_restart_topic": None,
+    "mqtt_restart_payload": "restart",
 
     # --- Camera Configuration ---
     "camera_name": "your_camera_name_in_frigate", # e.g., "front_door"

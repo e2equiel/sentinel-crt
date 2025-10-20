@@ -24,6 +24,8 @@ DEFAULT_CORE_CONFIG = {
     "mqtt_password": "",
     "frigate_topic": "frigate/events",
     "flight_topic": "flights/overhead",
+    "mqtt_restart_topic": None,
+    "mqtt_restart_payload": "restart",
     "camera_name": "default",
     "camera_rtsp_url": "",
     "frigate_host": "",
