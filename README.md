@@ -66,9 +66,9 @@ You will need to fill in:
 -   Your Mapbox account details (`mapbox_user`, `mapbox_token`, etc.) if you want to use the flight radar.
 -   Your home latitude and longitude.
 
-### 4. Download the Font
+### 4. Fonts
 
-The application uses the `VT323` font. Download `VT323-Regular.ttf` from [Google Fonts](https://fonts.google.com/specimen/VT323) and place it in the same directory as `sentinel_crt.py`.
+The UI uses the `VT323` font and ships with `sentinel/assets/fonts/VT323-Regular.ttf`. If you wish to replace the font, drop the updated file in that directory so the application can load it automatically.
 
 ## Running on a Raspberry Pi
 
@@ -109,7 +109,7 @@ pip install -r ~/sentinel-crt/requirements.txt
 
 ### 3. Follow Installation Steps
 
-Follow steps 1-4 from the main **Installation** section above to clone the repository, install Python packages, configure the app, and download the font.
+Follow steps 1-4 from the main **Installation** section above to clone the repository, install Python packages, configure the app, and confirm that the bundled font is present in `sentinel/assets/fonts/`.
 
 ### 4. Run the Application
 
@@ -151,6 +151,10 @@ To make the script run automatically when the Raspberry Pi starts, you can creat
     sudo systemctl start sentinel-crt.service
     ```
 You can check its status with `sudo systemctl status sentinel-crt.service`.
+
+## Documentation
+
+Detailed information about built-in modules and services lives under [`docs/modules`](docs/modules) and [`docs/services`](docs/services). Each page explains what the component does, how it is configured, and the events it emits or consumes.
 
 ## Home Assistant Flight Radar Integration
 

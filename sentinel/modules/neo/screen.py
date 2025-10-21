@@ -10,7 +10,7 @@ import numpy as np
 import pygame
 
 import config
-from neo_tracker import NEOTracker
+from .tracker import NEOTracker
 from sentinel.core import ScreenModule
 from sentinel.modules.common import draw_dashed_line
 

@@ -12,7 +12,7 @@ from sentinel.core import ScreenModule
 from sentinel.modules.common import draw_dashed_line
 
 from .ascii_globe import ASCIIGlobe
-from eonet_tracker import EONETTracker
+from .tracker import EONETTracker
 
 COLOR_WHITE = (220, 220, 220)
 COLOR_YELLOW = (255, 255, 0)
