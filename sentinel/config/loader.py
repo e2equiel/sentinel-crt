@@ -67,9 +67,16 @@ class ModuleSettings:
 class ConfigurationBundle:
     core: Dict[str, Any]
     modules: Dict[str, ModuleSettings]
-    services: Dict[str, Dict[str, Any]]
+    services: Dict[str, "ServiceSettings"]
     priorities: Dict[str, Any]
     theme_colors: Dict[str, Any]
+
+
+@dataclass
+class ServiceSettings:
+    path: str
+    enabled: bool = True
+    settings: Dict[str, Any] = field(default_factory=dict)
 
 
 def load_configuration(settings_dir: Optional[Path] = None) -> ConfigurationBundle:
@@ -95,8 +102,13 @@ def load_configuration(settings_dir: Optional[Path] = None) -> ConfigurationBund
         or (root_dir / "settings")
     )
 
-    core_config, modules_config, priorities_config, theme_colors = clone_defaults()
-    services_config: Dict[str, Dict[str, Any]] = {}
+    (
+        core_config,
+        modules_config,
+        services_config,
+        priorities_config,
+        theme_colors,
+    ) = clone_defaults()
 
     # -- load YAML files ----------------------------------------------------------
     core_yaml = settings_dir / "core.yaml"
@@ -125,7 +137,17 @@ def load_configuration(settings_dir: Optional[Path] = None) -> ConfigurationBund
     services_dir = settings_dir / "services"
     if services_dir.exists():
         for service_file in services_dir.glob("*.yaml"):
-            services_config[service_file.stem] = _load_yaml(service_file)
+            payload = _load_yaml(service_file)
+            name = service_file.stem
+            existing = services_config.get(name, {})
+            service_path = payload.get("service") or payload.get("path") or existing.get("service")
+            if not service_path:
+                raise ValueError(f"Service file '{service_file}' is missing the 'service' key")
+            services_config[name] = {
+                "service": service_path,
+                "enabled": payload.get("enabled", existing.get("enabled", True)),
+                "config": payload.get("config") or payload.get("settings") or existing.get("config", {}),
+            }
 
     theme_yaml = settings_dir / "theme.yaml"
     if theme_yaml.exists():
@@ -146,6 +168,7 @@ def load_configuration(settings_dir: Optional[Path] = None) -> ConfigurationBund
 
         modules_section = config_copy.pop("modules", None)
         priorities_section = config_copy.pop("priorities", None)
+        services_section = config_copy.pop("services", None)
 
         _deep_update(core_config, config_copy)
 
@@ -168,6 +191,22 @@ def load_configuration(settings_dir: Optional[Path] = None) -> ConfigurationBund
                     "config": payload.get("config") or payload.get("settings") or {},
                 }
 
+        if isinstance(services_section, Mapping):
+            for name, payload in services_section.items():
+                if not isinstance(payload, Mapping):
+                    continue
+                service_path = payload.get("service") or payload.get("path")
+                if not service_path:
+                    existing = services_config.get(name)
+                    service_path = existing.get("service") if isinstance(existing, Mapping) else None
+                if not service_path:
+                    continue
+                services_config[name] = {
+                    "service": service_path,
+                    "enabled": payload.get("enabled", True),
+                    "config": payload.get("config") or payload.get("settings") or {},
+                }
+
         theme_section = getattr(user_config, "THEME_COLORS", None)
         if isinstance(theme_section, Mapping):
             _deep_update(theme_colors, theme_section)
@@ -184,13 +223,29 @@ def load_configuration(settings_dir: Optional[Path] = None) -> ConfigurationBund
         cfg = payload.get("config") or payload.get("settings") or {}
         module_settings[name] = ModuleSettings(path=path, enabled=enabled, settings=dict(cfg))
 
+    service_settings: Dict[str, ServiceSettings] = {}
+    for name, payload in services_config.items():
+        if not isinstance(payload, Mapping):
+            continue
+        path = payload.get("service") or payload.get("path")
+        if not isinstance(path, str):
+            continue
+        enabled = bool(payload.get("enabled", True))
+        cfg = payload.get("config") or payload.get("settings") or {}
+        service_settings[name] = ServiceSettings(path=path, enabled=enabled, settings=dict(cfg))
+
     return ConfigurationBundle(
         core=core_config,
         modules=module_settings,
-        services=services_config,
+        services=service_settings,
         priorities=priorities_config,
         theme_colors=theme_colors,
     )
 
 
-__all__ = ["ConfigurationBundle", "ModuleSettings", "load_configuration"]
+__all__ = [
+    "ConfigurationBundle",
+    "ModuleSettings",
+    "ServiceSettings",
+    "load_configuration",
+]

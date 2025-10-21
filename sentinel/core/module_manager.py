@@ -414,10 +414,15 @@ class ModuleManager:
         if not target:
             raise ValueError("Module configuration must include 'module' or 'path'")
         cls = _import_string(target)
+        settings_payload = config.get("config") or config.get("settings") or {}
+        if isinstance(settings_payload, Mapping):
+            settings_payload = dict(settings_payload)
+        else:
+            settings_payload = {}
         if isinstance(cls, type) and issubclass(cls, ScreenModule):
-            return cls(config=config.get("config") or config.get("settings") or {})
+            return cls(config=settings_payload)
         if callable(cls):
-            return cls(config=config.get("config") or config.get("settings") or {})
+            return cls(config=settings_payload)
         raise TypeError(f"Cannot instantiate module from target '{target}'")
 
     # ---------------------------------------------------------------- properties

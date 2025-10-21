@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import math
+import random
 from typing import Optional
 
 import numpy as np
 import pygame
 
 import config
+from neo_tracker import NEOTracker
 from sentinel.core import ScreenModule
 from sentinel.modules.common import draw_dashed_line
 
@@ -19,26 +21,44 @@ COLOR_YELLOW = (255, 255, 0)
 class NeoTrackerModule(ScreenModule):
     slug = "neo_tracker"
 
+    def __init__(self, config: Optional[dict] = None) -> None:
+        super().__init__(config=config)
+        self.neo_tracker: Optional[NEOTracker] = None
+        self.sphere_rotation_angle = 0.0
+        self.planet_angles = [random.uniform(0, 2 * math.pi) for _ in range(4)]
+        self.asteroid_path_progress = 0.0
+
+    def on_load(self) -> None:
+        api_key = config.CONFIG.get("nasa_api_key", "")
+        self.neo_tracker = NEOTracker(api_key)
+        self.neo_tracker.start_periodic_fetch(interval_hours=6)
+
     def on_show(self) -> None:
         if self.app:
             self.app.header_title_text = "S.E.N.T.I.N.E.L. // DEEP SPACE"
 
     def render(self, surface: pygame.Surface) -> None:  # pragma: no cover - Pygame rendering
-        app = self.app
-        if app is None:
+        if not self.app or not self.neo_tracker:
             return
 
-        neo_data = app.neo_tracker.get_closest_neo_data()
+        neo_data = self.neo_tracker.get_closest_neo_data()
         sphere_center_x = surface.get_width() // 2
         sphere_center_y = surface.get_height() // 2 + 20
         sphere_radius = 120
-        self._draw_vector_sphere(surface, sphere_center_x, sphere_center_y, sphere_radius, app.current_theme_color, app.sphere_rotation_angle)
-        self._draw_asteroid_trajectory(surface, sphere_center_x, sphere_center_y, sphere_radius, neo_data, app.current_theme_color, app)
-        self._draw_neo_hud(surface, neo_data, app)
-        self._draw_solar_system_map(surface, neo_data, app)
+        self._draw_vector_sphere(surface, sphere_center_x, sphere_center_y, sphere_radius, self.app.current_theme_color, self.sphere_rotation_angle)
+        self._draw_asteroid_trajectory(surface, sphere_center_x, sphere_center_y, sphere_radius, neo_data, self.app.current_theme_color)
+        self._draw_neo_hud(surface, neo_data)
+        self._draw_solar_system_map(surface, neo_data)
 
     def update(self, dt: float) -> None:
-        return
+        self.sphere_rotation_angle = (self.sphere_rotation_angle + 0.005) % (2 * math.pi)
+        self.planet_angles[0] = (self.planet_angles[0] + 0.010) % (2 * math.pi)
+        self.planet_angles[1] = (self.planet_angles[1] + 0.007) % (2 * math.pi)
+        self.planet_angles[2] = (self.planet_angles[2] + 0.005) % (2 * math.pi)
+        self.planet_angles[3] = (self.planet_angles[3] + 0.003) % (2 * math.pi)
+        self.asteroid_path_progress += 0.008
+        if self.asteroid_path_progress > 1.0:
+            self.asteroid_path_progress = 0.0
 
     # ------------------------------------------------------------------ helpers
     def _draw_vector_sphere(self, surface: pygame.Surface, x: int, y: int, radius: int, color, rotation_angle: float) -> None:
@@ -60,7 +80,7 @@ class NeoTrackerModule(ScreenModule):
             rect = pygame.Rect(x - ellipse_width // 2, lat_y - 2, ellipse_width, 4)
             pygame.draw.ellipse(surface, color, rect, 1)
 
-    def _draw_asteroid_trajectory(self, surface: pygame.Surface, cx: int, cy: int, radius: int, neo_data: Optional[dict], color, app) -> None:
+    def _draw_asteroid_trajectory(self, surface: pygame.Surface, cx: int, cy: int, radius: int, neo_data: Optional[dict], color) -> None:
         if not neo_data:
             return
 
@@ -87,24 +107,26 @@ class NeoTrackerModule(ScreenModule):
                 width = int(np.clip(1 + z * 2, 1, 3))
                 pygame.draw.line(surface, color + (alpha,), (x1, y1), (x2, y2), width)
 
-    def _draw_neo_hud(self, surface: pygame.Surface, neo_data: Optional[dict], app) -> None:
+    def _draw_neo_hud(self, surface: pygame.Surface, neo_data: Optional[dict]) -> None:
+        if not self.app:
+            return
         margins = config.CONFIG["margins"]
         x_offset = margins["left"] + 10
         y_offset = margins["top"] + 45
 
-        title_surf = app.font_large.render("// DEEP SPACE THREAT ANALYSIS //", True, app.current_theme_color)
+        title_surf = self.app.font_large.render("// DEEP SPACE THREAT ANALYSIS //", True, self.app.current_theme_color)
         surface.blit(title_surf, (x_offset, y_offset))
         y_offset += 30
 
         if not neo_data:
-            status_surf = app.font_medium.render("...ACQUIRING TARGET DATA...", True, app.current_theme_color)
+            status_surf = self.app.font_medium.render("...ACQUIRING TARGET DATA...", True, self.app.current_theme_color)
             surface.blit(status_surf, (x_offset, y_offset))
             return
 
         line_height = 18
         is_hazardous = neo_data["is_hazardous"]
         assessment_text = "!!! POTENTIAL HAZARD !!!" if is_hazardous else "[ NOMINAL ]"
-        assessment_color = app.theme_colors["danger"] if is_hazardous else COLOR_WHITE
+        assessment_color = self.app.theme_colors["danger"] if is_hazardous else COLOR_WHITE
 
         info_lines = [
             ("ID:", neo_data["name"], COLOR_WHITE),
@@ -116,21 +138,23 @@ class NeoTrackerModule(ScreenModule):
         ]
 
         for label, value, value_color in info_lines:
-            label_surf = app.font_small.render(label, True, app.current_theme_color)
-            value_surf = app.font_medium.render(value, True, value_color)
+            label_surf = self.app.font_small.render(label, True, self.app.current_theme_color)
+            value_surf = self.app.font_medium.render(value, True, value_color)
             surface.blit(label_surf, (x_offset, y_offset))
             y_offset += line_height
             surface.blit(value_surf, (x_offset, y_offset))
             y_offset += line_height * 1.5
 
-    def _draw_solar_system_map(self, surface: pygame.Surface, neo_data: Optional[dict], app) -> None:
+    def _draw_solar_system_map(self, surface: pygame.Surface, neo_data: Optional[dict]) -> None:
+        if not self.app:
+            return
         map_rect = pygame.Rect(400, 280, 220, 180)
         center_x = map_rect.centerx
         center_y = map_rect.centery
         max_radius = map_rect.width // 2 - 10
 
-        pygame.draw.rect(surface, app.current_theme_color, map_rect, 1)
-        map_title_surf = app.font_small.render("SYSTEM NAV-MAP", True, app.current_theme_color)
+        pygame.draw.rect(surface, self.app.current_theme_color, map_rect, 1)
+        map_title_surf = self.app.font_small.render("SYSTEM NAV-MAP", True, self.app.current_theme_color)
         surface.blit(map_title_surf, (map_rect.x + 5, map_rect.y + 2))
 
         pygame.draw.circle(surface, COLOR_YELLOW, (center_x, center_y), 5)
@@ -138,9 +162,9 @@ class NeoTrackerModule(ScreenModule):
         orbit_radii = [max_radius * 0.3, max_radius * 0.5, max_radius * 0.75, max_radius * 0.95]
         planet_colors = [(165, 42, 42), (210, 180, 140), (0, 120, 255), (255, 69, 0)]
         for i, radius in enumerate(orbit_radii):
-            pygame.draw.circle(surface, app.current_theme_color + (40,), (center_x, center_y), int(radius), 1)
-            planet_x = center_x + radius * math.cos(app.planet_angles[i])
-            planet_y = center_y + radius * math.sin(app.planet_angles[i])
+            pygame.draw.circle(surface, self.app.current_theme_color + (40,), (center_x, center_y), int(radius), 1)
+            planet_x = center_x + radius * math.cos(self.planet_angles[i])
+            planet_y = center_y + radius * math.sin(self.planet_angles[i])
             pygame.draw.circle(surface, planet_colors[i], (int(planet_x), int(planet_y)), 2)
 
         if not neo_data:
@@ -159,12 +183,12 @@ class NeoTrackerModule(ScreenModule):
             x = (1 - t_step) ** 2 * p0[0] + 2 * (1 - t_step) * t_step * p1[0] + t_step**2 * p2[0]
             y = (1 - t_step) ** 2 * p0[1] + 2 * (1 - t_step) * t_step * p1[1] + t_step**2 * p2[1]
             path_points.append((x, y))
-        pygame.draw.lines(surface, app.current_theme_color + (80,), False, path_points, 1)
+        pygame.draw.lines(surface, self.app.current_theme_color + (80,), False, path_points, 1)
 
-        t = app.asteroid_path_progress
+        t = self.asteroid_path_progress
         ast_x = (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t**2 * p2[0]
         ast_y = (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t**2 * p2[1]
-        ast_color = app.theme_colors["danger"] if neo_data["is_hazardous"] else COLOR_YELLOW
+        ast_color = self.app.theme_colors["danger"] if neo_data["is_hazardous"] else COLOR_YELLOW
         pygame.draw.circle(surface, ast_color, (int(ast_x), int(ast_y)), 2)
 
 

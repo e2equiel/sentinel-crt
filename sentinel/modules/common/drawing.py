@@ -1,11 +1,11 @@
-"""Shared drawing helpers for Sentinel modules."""
-
 from __future__ import annotations
 
 import math
 from typing import Tuple
 
 import pygame
+
+from sentinel.ui import draw_diagonal_pattern
 
 Color = Tuple[int, int, int]
 
@@ -42,35 +42,6 @@ def draw_dashed_line(
             y1 + dy * (i * 2 + 1) / dashes,
         )
         pygame.draw.line(surface, color, start, end, width)
-
-
-def draw_diagonal_pattern(
-    surface: pygame.Surface,
-    color: Color,
-    rect: pygame.Rect,
-    angle: float,
-    *,
-    spacing: int = 5,
-    line_width: int = 1,
-    phase: float = 0,
-) -> None:
-    """Fill ``rect`` within ``surface`` using a diagonal hatch pattern."""
-
-    diagonal = int(math.hypot(rect.width, rect.height))
-    temp_surface = pygame.Surface((diagonal, diagonal), pygame.SRCALPHA)
-
-    phase_int = int(phase)
-    for x in range(-diagonal, diagonal, spacing):
-        x_pos = x + (phase_int % spacing)
-        pygame.draw.line(temp_surface, color, (x_pos, 0), (x_pos, diagonal), line_width)
-
-    rotated_surface = pygame.transform.rotozoom(temp_surface, angle, 1)
-    rotated_rect = rotated_surface.get_rect(center=rect.center)
-
-    original_clip = surface.get_clip()
-    surface.set_clip(rect)
-    surface.blit(rotated_surface, rotated_rect)
-    surface.set_clip(original_clip)
 
 
 __all__ = ["draw_dashed_line", "draw_diagonal_pattern"]

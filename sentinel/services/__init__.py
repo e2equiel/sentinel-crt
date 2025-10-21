@@ -1,3 +1,6 @@
-"""Service layer package for shared Sentinel resources."""
+"""Service layer utilities for the Sentinel application."""
 
-# Services will be added as part of the ongoing refactor.
+from .mqtt import MQTTService
+from .video import VideoCaptureService
+
+__all__ = ["MQTTService", "VideoCaptureService"]
