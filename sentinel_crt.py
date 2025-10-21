@@ -4,6 +4,7 @@ import time
 import random
 import threading
 import traceback
+from pathlib import Path
 
 # Import configuration from the separate config file
 import config
@@ -48,14 +49,16 @@ class SentinelApp:
         pygame.mouse.set_visible(False)
         self.clock = pygame.time.Clock()
 
+        font_path = Path(__file__).resolve().parent / "sentinel" / "assets" / "fonts" / "VT323-Regular.ttf"
         try:
-            self.font_large = pygame.font.Font('VT323-Regular.ttf', 24)
-            self.font_medium = pygame.font.Font('VT323-Regular.ttf', 20)
-            self.font_small = pygame.font.Font('VT323-Regular.ttf', 16)
-            self.font_tiny = pygame.font.Font('VT323-Regular.ttf', 12)
+            font_file = str(font_path)
+            self.font_large = pygame.font.Font(font_file, 24)
+            self.font_medium = pygame.font.Font(font_file, 20)
+            self.font_small = pygame.font.Font(font_file, 16)
+            self.font_tiny = pygame.font.Font(font_file, 12)
         except pygame.error as e:
             print(f"Error loading font VT323-Regular.ttf: {e}")
-            print("Please make sure the font file is in the same directory as the script.")
+            print(f"Please make sure the font file is available at {font_path}.")
             sys.exit()
 
         self.event_bus = EventBus()
