@@ -95,14 +95,37 @@ DEFAULT_PRIORITIES = {
 }
 
 
+DEFAULT_SERVICES = {
+    "mqtt": {
+        "service": "sentinel.services.mqtt:MQTTService",
+        "enabled": True,
+        "config": {
+            "detection_event": "services.mqtt.detection",
+            "flights_event": "services.mqtt.flights",
+            "restart_event": "system.restart",
+            "status_event": "services.mqtt.status",
+        },
+    },
+    "video_capture": {
+        "service": "sentinel.services.video:VideoCaptureService",
+        "enabled": True,
+        "config": {
+            "frame_event": "services.video.frame",
+            "status_event": "services.video.status",
+        },
+    },
+}
+
+
 def clone_defaults():
     """
     Create deep copies of the module's default configuration structures.
     
     Returns:
-        tuple: (core_config, modules, priorities, theme_colors)
+        tuple: (core_config, modules, services, priorities, theme_colors)
             core_config (dict): Deep copy of DEFAULT_CORE_CONFIG.
             modules (dict): Deep copy of DEFAULT_MODULES.
+            services (dict): Deep copy of DEFAULT_SERVICES.
             priorities (dict): Deep copy of DEFAULT_PRIORITIES.
             theme_colors (dict): Deep copy of DEFAULT_THEME_COLORS.
     """
@@ -110,6 +133,7 @@ def clone_defaults():
     return (
         deepcopy(DEFAULT_CORE_CONFIG),
         deepcopy(DEFAULT_MODULES),
+        deepcopy(DEFAULT_SERVICES),
         deepcopy(DEFAULT_PRIORITIES),
         deepcopy(DEFAULT_THEME_COLORS),
     )

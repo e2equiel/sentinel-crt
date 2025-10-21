@@ -12,6 +12,7 @@ from sentinel.core import ScreenModule
 from sentinel.modules.common import draw_dashed_line
 
 from .ascii_globe import ASCIIGlobe
+from eonet_tracker import EONETTracker
 
 COLOR_WHITE = (220, 220, 220)
 COLOR_YELLOW = (255, 255, 0)
@@ -23,6 +24,8 @@ class EONETGlobeModule(ScreenModule):
     def __init__(self, config=None):
         super().__init__(config=config)
         self._ascii_globe: Optional[ASCIIGlobe] = None
+        self._tracker: Optional[EONETTracker] = None
+        self._globe_rotation_angle = 0.0
 
     def on_load(self) -> None:
         if not self.app:
@@ -36,6 +39,8 @@ class EONETGlobeModule(ScreenModule):
             radius,
             center,
         )
+        self._tracker = EONETTracker()
+        self._tracker.start_periodic_fetch(interval_hours=1)
 
     def on_show(self) -> None:
         if self.app:
@@ -43,14 +48,15 @@ class EONETGlobeModule(ScreenModule):
 
     def on_unload(self) -> None:
         self._ascii_globe = None
+        self._tracker = None
 
     def render(self, surface: pygame.Surface) -> None:  # pragma: no cover - Pygame rendering
         app = self.app
-        if app is None or self._ascii_globe is None:
+        if app is None or self._ascii_globe is None or self._tracker is None:
             return
 
         color = app.current_theme_color
-        events = app.eonet_tracker.get_events()
+        events = self._tracker.get_events()
         self._ascii_globe.draw(surface, app.font_tiny, color)
 
         if events:
@@ -59,7 +65,7 @@ class EONETGlobeModule(ScreenModule):
                 if not coords or len(coords) != 2:
                     continue
                 lon, lat = coords
-                lon_rad = math.radians(lon) + app.globe_rotation_angle
+                lon_rad = math.radians(lon) + self._globe_rotation_angle
                 lat_rad = math.radians(lat)
                 x3d = math.cos(lat_rad) * math.cos(lon_rad)
                 y3d = math.sin(lat_rad)
@@ -84,13 +90,13 @@ class EONETGlobeModule(ScreenModule):
                 alpha = int(100 + 155 * max(z3d, 0))
                 pygame.draw.circle(surface, COLOR_YELLOW + (alpha,), (screen_x, screen_y), 4)
 
-        self._draw_eonet_hud(surface, app, events or [])
+        self._draw_eonet_hud(surface, events or [])
 
     def update(self, dt: float) -> None:
-        app = self.app
-        if app is None or self._ascii_globe is None:
+        if self._ascii_globe is None:
             return
-        self._ascii_globe.update(angle_x=0.0, angle_y=app.globe_rotation_angle)
+        self._globe_rotation_angle = (self._globe_rotation_angle + 0.008) % (2 * math.pi)
+        self._ascii_globe.update(angle_x=0.0, angle_y=self._globe_rotation_angle)
 
     # ------------------------------------------------------------------ helpers
     def _get_hud_tag_topleft(self, app, center_pos, text: str):
@@ -115,16 +121,16 @@ class EONETGlobeModule(ScreenModule):
         surface.blit(text_surf, (bg_rect.x + padding, bg_rect.y + padding))
         pygame.draw.rect(surface, color, bg_rect, 1)
 
-    def _draw_eonet_hud(self, surface: pygame.Surface, app, events: Iterable[dict]) -> None:
+    def _draw_eonet_hud(self, surface: pygame.Surface, events: Iterable[dict]) -> None:
         margins = config.CONFIG["margins"]
         x_offset = margins["left"] + 20
         y_offset = margins["top"] + 60
-        title_surf = app.font_large.render("// GLOBAL EVENT MONITOR //", True, app.current_theme_color)
+        title_surf = self.app.font_large.render("// GLOBAL EVENT MONITOR //", True, self.app.current_theme_color)
         surface.blit(title_surf, (x_offset, y_offset))
         y_offset += 30
 
         if not events:
-            status_surf = app.font_medium.render("...SCANNING FOR GLOBAL EVENTS...", True, app.current_theme_color)
+            status_surf = self.app.font_medium.render("...SCANNING FOR GLOBAL EVENTS...", True, self.app.current_theme_color)
             surface.blit(status_surf, (x_offset, y_offset))
             return
 
@@ -134,23 +140,23 @@ class EONETGlobeModule(ScreenModule):
         for index, event in enumerate(events[:max_events_to_show], 1):
             number_box_size = 22
             box_rect = pygame.Rect(x_offset, y_offset, number_box_size, number_box_size)
-            pygame.draw.rect(surface, app.current_theme_color, box_rect, 1)
-            num_surf = app.font_small.render(str(index), True, COLOR_WHITE)
+            pygame.draw.rect(surface, self.app.current_theme_color, box_rect, 1)
+            num_surf = self.app.font_small.render(str(index), True, COLOR_WHITE)
             surface.blit(num_surf, num_surf.get_rect(center=box_rect.center).topleft)
 
             text_x_offset = x_offset + number_box_size + 8
             category_color = (
-                app.theme_colors["warning"]
+                self.app.theme_colors["warning"]
                 if event.get("category") in {"Wildfires", "Severe Storms"}
                 else COLOR_WHITE
             )
-            cat_surf = app.font_small.render(f"[{event.get('category', '').upper()}]", True, category_color)
+            cat_surf = self.app.font_small.render(f"[{event.get('category', '').upper()}]", True, category_color)
             surface.blit(cat_surf, (text_x_offset, y_offset))
 
             title_text = event.get("title", "")
             if len(title_text) > 35:
                 title_text = title_text[:32] + "..."
-            title_surf = app.font_medium.render(title_text, True, COLOR_WHITE)
+            title_surf = self.app.font_medium.render(title_text, True, COLOR_WHITE)
             surface.blit(title_surf, (text_x_offset, y_offset + line_height))
 
             y_offset += line_height * 2.5
