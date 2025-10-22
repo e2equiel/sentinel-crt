@@ -13,7 +13,7 @@ Sentinel CRT is a Python-based monitoring interface designed with a retro, CRT-l
 -   **Alert Levels**: The interface color theme changes dynamically (Green, Orange, Red) based on the threat level of the zone an object enters.
 -   **Aircraft Radar**: Switches to a radar map display when an aircraft is detected overhead, showing its position, callsign, altitude, and route.
 -   **CRT Aesthetic**: Uses a retro pixel font (VT323) and visual effects like scanlines and grid overlays to mimic the look of an old terminal.
--   **Highly Configurable**: All settings, from MQTT credentials to alert zones and Mapbox tokens, are managed in a single `config.py` file.
+-   **Highly Configurable**: All settings, from MQTT credentials to alert zones and Mapbox tokens, live in modular YAML files under `settings/` with optional overrides in `config.py`.
 
 ## Hardware Requirements
 
@@ -52,25 +52,72 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3. Create Configuration File
+### 3. Create Configuration Files
 
-Copy the example configuration file and edit it with your own settings.
+Sentinel CRT now loads its configuration from YAML fragments stored in the
+[`settings/`](settings) directory. Create `settings/core.yaml` with the values
+that match your setup and extend modules/services as needed (see
+[`settings/README.md`](settings/README.md) for details).
+
 ```bash
-cp config.py.example config.py
-nano config.py
+cat > settings/core.yaml <<'EOF'
+# Basic MQTT and display settings (replace the placeholders)
+mqtt_host: mqtt.local
+mqtt_port: 1883
+mqtt_user: sentinel
+mqtt_password: change-me
+frigate_topic: frigate/events
+flight_topic: flights/overhead
+mqtt_restart_topic: null
+mqtt_restart_payload: restart
+
+# Camera and Frigate configuration
+camera_name: front_door
+camera_rtsp_url: rtsp://user:password@camera.local:554/stream
+frigate_host: frigate.local
+frigate_resolution: [1920, 1080]
+
+# Radar / Mapbox configuration
+mapbox_user: your_mapbox_user
+mapbox_style_id: your_style_id
+mapbox_token: pk.your_mapbox_token
+map_latitude: -34.6037
+map_longitude: -58.3816
+map_radius_m: 15000
+map_distance_rings: 3
+map_radial_lines: true
+flight_screen_timeout: 10
+min_flight_altitude_ft: 1000
+EOF
 ```
-You will need to fill in:
--   Your MQTT broker details (`mqtt_host`, `mqtt_user`, `mqtt_password`).
--   Your camera's RTSP URL and Frigate settings (`camera_name`, `camera_rtsp_url`, etc.).
--   Your Frigate alert zones.
--   Your Mapbox account details (`mapbox_user`, `mapbox_token`, etc.) if you want to use the flight radar.
--   Your home latitude and longitude.
+
+Secrets that you prefer to keep out of YAML files can still be added to a small
+`config.py` file (for example, by copying `config.py.example` and removing the
+values that now live in YAML). The loader merges `config.py` after the YAML
+fragments, so both approaches remain compatible.
 
 ### 4. Fonts
 
 The UI uses the `VT323` font and ships with `sentinel/assets/fonts/VT323-Regular.ttf`. If you wish to replace the font, drop the updated file in that directory so the application can load it automatically.
 
 ## Running on a Raspberry Pi
+
+### Automated installation on Raspberry Pi OS
+
+You can bootstrap a complete installation (system packages, Python virtual
+environment, boot configuration, and systemd service) using the provided
+installer script. The script will prompt for the Linux user that should own the
+application files, ask whether the video output should use HDMI or the composite
+connector, and enable the `sentinel-crt.service` unit so the UI launches on
+startup.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/e2equiel/sentinel-crt/main/scripts/install_rpi.sh | sudo bash
+```
+
+> ℹ️ The script is safe to rerun. Existing repositories, virtual environments,
+> and modular YAML configuration files are preserved. Legacy `config.py`
+> settings are migrated automatically on first run.
 
 ### 1. Prepare Raspberry OS
 
@@ -92,11 +139,12 @@ The UI uses the `VT323` font and ships with `sentinel/assets/fonts/VT323-Regular
 You may need to install some system libraries for OpenCV and Pygame to work correctly.
 ```bash
 sudo apt update && sudo apt upgrade
-sudo apt install -y git python3 python3-pip python3-venv libatlas-base-dev libavformat-dev \
-  libavcodec-dev libswscale-dev libqtgui4 libqt4-test libopenjp2-7 libtiff5 libjpeg-dev \
-  libhdf5-dev libopenblas-dev liblapack-dev libxcb1-dev libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 \
-  libsdl2-ttf-2.0-0 libportmidi0 libfreetype6-dev libglib2.0-0
+sudo apt install -y git curl python3 python3-pip python3-venv python3-dev pkg-config \
+  build-essential libatlas-base-dev libavformat-dev libavcodec-dev libswscale-dev libopenjp2-7 \
+  libjpeg-dev libfreetype6-dev libportmidi0 libsdl2-dev libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 \
+  libsdl2-ttf-2.0-0 libudev-dev libdrm-dev libegl1-mesa libgbm1 libxcb1-dev
 ```
+> Depending on the Raspberry Pi OS release you may also need to install `libtiff5` or `libtiff6`.
 
 After installing the packages, create and activate a virtual environment (if you did not already do so during the repository set up) and install the Python dependencies:
 
@@ -158,7 +206,7 @@ Detailed information about built-in modules and services lives under [`docs/modu
 
 ## Home Assistant Flight Radar Integration
 
-Sentinel CRT expects flight data over MQTT on the topic configured in `config.py` (`flight_topic`, default `flights/overhead`). Each message can be a single JSON object or a JSON array of aircraft objects. The application calculates proximity based on your configured `map_latitude` and `map_longitude` and displays the closest aircraft. The following fields are used:
+Sentinel CRT expects flight data over MQTT on the topic configured in your settings (`flight_topic`, default `flights/overhead`). Each message can be a single JSON object or a JSON array of aircraft objects. The application calculates proximity based on your configured `map_latitude` and `map_longitude` and displays the closest aircraft. The following fields are used:
 
 | Field | Required | Description |
 |-------|----------|-------------|
