@@ -18,6 +18,7 @@ FRESH_CLONE="false"
 MIGRATED_CONFIG="false"
 LEGACY_START_SCRIPT_DISABLED=""
 LEGACY_PROFILE_BACKUP=""
+NON_INTERACTIVE="false"
 
 declare -a BASE_PACKAGES=(
     git
@@ -64,6 +65,21 @@ BANNER
     echo "Version: ${SCRIPT_VERSION}"
     echo "This script will install Sentinel CRT and configure it to start on boot."
     echo
+}
+
+ensure_interactive_stdin() {
+    if [[ -t 0 ]]; then
+        return
+    fi
+
+    if [[ -e /dev/tty ]]; then
+        if exec </dev/tty; then
+            return
+        fi
+    fi
+
+    NON_INTERACTIVE="true"
+    echo "[WARN] No interactive TTY detected. Falling back to default responses."
 }
 
 detect_os_details() {
@@ -116,7 +132,16 @@ prompt_target_user() {
         default_user="pi"
     fi
 
-    read -rp "Enter the user that should own the installation [${default_user}]: " chosen_user
+    local chosen_user=""
+    if [[ ${NON_INTERACTIVE} == "true" ]]; then
+        echo "[INFO] Defaulting installation owner to '${default_user}'."
+    else
+        read -rp "Enter the user that should own the installation [${default_user}]: " chosen_user || true
+        if [[ -z ${chosen_user} ]]; then
+            chosen_user=${default_user}
+        fi
+    fi
+
     if [[ -z ${chosen_user} ]]; then
         chosen_user=${default_user}
     fi
@@ -135,6 +160,13 @@ prompt_target_user() {
 }
 
 prompt_video_output() {
+    if [[ ${NON_INTERACTIVE} == "true" ]]; then
+        VIDEO_MODE="hdmi"
+        SDTV_MODE=""
+        echo "[INFO] Defaulting video output to HDMI."
+        return
+    fi
+
     echo "Select the video output for the Raspberry Pi:"
     echo "  1) HDMI / digital display"
     echo "  2) Composite (AV) output"
@@ -160,6 +192,12 @@ prompt_video_output() {
 }
 
 prompt_sdtv_mode() {
+    if [[ ${NON_INTERACTIVE} == "true" ]]; then
+        SDTV_MODE="0"
+        echo "[INFO] Defaulting composite video mode to NTSC (sdtv_mode=0)."
+        return
+    fi
+
     echo
     echo "Select the composite TV format:"
     echo "  1) NTSC (North America, 60Hz)"
@@ -496,7 +534,12 @@ disable_legacy_autostart() {
 
 maybe_start_service() {
     echo
-    read -rp "Would you like to start Sentinel CRT now? [Y/n]: " start_choice || true
+    local start_choice=""
+    if [[ ${NON_INTERACTIVE} == "true" ]]; then
+        start_choice="Y"
+    else
+        read -rp "Would you like to start Sentinel CRT now? [Y/n]: " start_choice || true
+    fi
     case ${start_choice:-Y} in
         [Yy]*)
             if systemctl start sentinel-crt.service; then
@@ -559,6 +602,7 @@ EOF
 main() {
     print_banner
     require_root
+    ensure_interactive_stdin
     detect_os_details
     detect_default_target
     prompt_target_user
