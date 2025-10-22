@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.1.1"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -521,13 +521,40 @@ disable_legacy_autostart() {
         echo "[INFO] Disabled legacy start script at ${disabled_path}."
     fi
 
-    if [[ -f ${profile_path} ]] && grep -q "sentinel-crt" "${profile_path}"; then
+    if [[ -f ${profile_path} ]] && grep -qE "sentinel-crt|start\\.sh|sentinel_crt\\.py|xinit" "${profile_path}"; then
         LEGACY_PROFILE_BACKUP="${profile_path}.sentinel-backup"
         if [[ ! -f ${LEGACY_PROFILE_BACKUP} ]]; then
             cp "${profile_path}" "${LEGACY_PROFILE_BACKUP}"
             chown "${TARGET_USER}:${TARGET_USER}" "${LEGACY_PROFILE_BACKUP}"
         fi
-        sed -i 's/^[[:space:]]*\([^#].*sentinel-crt.*\)$/# SENTINEL-CRT DISABLED: \1/' "${profile_path}"
+
+        # Comment individual lines that invoke the legacy launcher while leaving the surrounding
+        # shell logic intact so login shells still work normally.
+        python3 - <<'PY' "${profile_path}"
+import sys
+from pathlib import Path
+
+profile_path = Path(sys.argv[1])
+patterns = ("sentinel-crt", "start.sh", "sentinel_crt.py", "xinit")
+
+lines = profile_path.read_text().splitlines()
+output = []
+for line in lines:
+    stripped = line.lstrip()
+    if stripped.startswith('#'):
+        output.append(line)
+        continue
+
+    if any(pat in line for pat in patterns):
+        output.append(f"# SENTINEL-CRT DISABLED: {line}" if not line.startswith('#') else line)
+    else:
+        output.append(line)
+
+profile_path.write_text("\n".join(output) + "\n")
+PY
+
+        chown "${TARGET_USER}:${TARGET_USER}" "${profile_path}"
+
         echo "[INFO] Commented legacy auto-start entries in ${profile_path}."
     fi
 }
