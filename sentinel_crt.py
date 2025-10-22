@@ -1,3 +1,4 @@
+import argparse
 import pygame
 import sys
 import time
@@ -5,6 +6,7 @@ import random
 import threading
 import traceback
 from pathlib import Path
+from typing import Optional, Sequence
 
 # Import configuration from the separate config file
 import config
@@ -18,7 +20,7 @@ COLOR_BLACK = (0, 0, 0)
 
 
 class SentinelApp:
-    def __init__(self):
+    def __init__(self, fullscreen: Optional[bool] = None):
         """Initialize the Sentinel runtime, services, and module manager."""
 
         pygame.init()
@@ -38,8 +40,11 @@ class SentinelApp:
         self.theme_colors.update(self.settings.theme_colors)
         config.THEME_COLORS = self.theme_colors
 
-        fullscreen = self.core_settings.get("fullscreen", True)
-        if fullscreen:
+        fullscreen_enabled = bool(fullscreen) if fullscreen is not None else False
+        self.core_settings["fullscreen"] = fullscreen_enabled
+        config.CONFIG["fullscreen"] = fullscreen_enabled
+
+        if fullscreen_enabled:
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         else:
             width = self.core_settings.get("screen_width", 640)
@@ -313,6 +318,21 @@ class SentinelApp:
         )
 
 
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    """Parse command-line arguments for the Sentinel CRT application."""
+
+    parser = argparse.ArgumentParser(description="Sentinel CRT user interface")
+    parser.set_defaults(fullscreen=None)
+    parser.add_argument(
+        "--fullscreen",
+        dest="fullscreen",
+        action="store_true",
+        help="Launch the interface in fullscreen mode.",
+    )
+    return parser.parse_args(argv)
+
+
 if __name__ == '__main__':
-    app = SentinelApp()
+    args = parse_args()
+    app = SentinelApp(fullscreen=args.fullscreen)
     sys.exit(app.run())
