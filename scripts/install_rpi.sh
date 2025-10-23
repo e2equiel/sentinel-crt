@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.4"
+SCRIPT_VERSION="1.1.7"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -17,6 +17,9 @@ SDL_DRIVER=""
 SDL_FALLBACK_DRIVER=""
 SDL_DRIVER_NOTE=""
 LAUNCH_METHOD="direct"
+TARGET_USER=""
+TARGET_HOME=""
+TARGET_UID=""
 declare -a GROUPS_ADDED=()
 declare -a REQUIRED_GROUPS=(
     video
@@ -68,6 +71,7 @@ declare -a XINIT_PACKAGES=(
     xserver-xorg
     x11-xserver-utils
     xinit
+    kbd
 )
 
 print_banner() {
@@ -167,6 +171,7 @@ prompt_target_user() {
 
     TARGET_USER=${chosen_user}
     TARGET_HOME=$(getent passwd "${TARGET_USER}" | cut -d: -f6)
+    TARGET_UID=$(id -u "${TARGET_USER}")
     if [[ -z ${TARGET_HOME} || ! -d ${TARGET_HOME} ]]; then
         echo "[ERROR] Could not determine home directory for '${TARGET_USER}'." >&2
         exit 1
@@ -404,6 +409,59 @@ ensure_xinit_packages() {
     install_if_available "${XINIT_PACKAGES[@]}"
 }
 
+configure_xwrapper_permissions() {
+    if [[ ${LAUNCH_METHOD} != "xinit" ]]; then
+        return
+    fi
+
+    local wrapper_path="/etc/X11/Xwrapper.config"
+    local backup_path="${wrapper_path}.sentinel-backup"
+    local needs_update="false"
+
+    mkdir -p /etc/X11
+
+    if [[ ! -f ${wrapper_path} ]]; then
+        needs_update="true"
+    else
+        local allowed_line
+        allowed_line=$(grep -E '^allowed_users=' "${wrapper_path}" || true)
+        if [[ ${allowed_line} != "allowed_users=anybody" ]]; then
+            needs_update="true"
+        fi
+
+        if ! grep -qE '^needs_root_rights=' "${wrapper_path}"; then
+            needs_update="true"
+        fi
+    fi
+
+    if [[ ${needs_update} != "true" ]]; then
+        return
+    fi
+
+    if [[ -f ${wrapper_path} && ! -f ${backup_path} ]]; then
+        cp "${wrapper_path}" "${backup_path}"
+        chown root:root "${backup_path}"
+        chmod 0644 "${backup_path}"
+    fi
+
+    local tmp_path="${wrapper_path}.tmp"
+    {
+        echo "allowed_users=anybody"
+        echo "needs_root_rights=no"
+        if [[ -f ${wrapper_path} ]]; then
+            grep -vE '^(allowed_users|needs_root_rights)=' "${wrapper_path}" || true
+        fi
+    } > "${tmp_path}"
+
+    mv "${tmp_path}" "${wrapper_path}"
+    chmod 0644 "${wrapper_path}"
+
+    echo "[INFO] Configured ${wrapper_path} to allow non-console Xorg sessions."
+    if [[ -f ${backup_path} ]]; then
+        echo "[INFO] Previous Xwrapper configuration backed up to ${backup_path}."
+    fi
+}
+
 update_system_packages() {
     echo
     echo "[INFO] Updating apt package index..."
@@ -610,13 +668,19 @@ create_systemd_service() {
     local venv_dir="${install_dir}/venv"
     local wanted_target="multi-user.target"
     local exec_start="${venv_dir}/bin/python ${install_dir}/sentinel_crt.py --fullscreen"
+    local user_uid="${TARGET_UID}"
+    if [[ -z ${user_uid} ]]; then
+        user_uid=$(id -u "${TARGET_USER}")
+    fi
+    local runtime_dir="/run/user/${user_uid}"
 
     if [[ ${HAS_GRAPHICAL_TARGET} == "true" ]]; then
         wanted_target="graphical.target"
     fi
 
     if [[ ${LAUNCH_METHOD} == "xinit" ]]; then
-        exec_start="/usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 vt1 -nolisten tcp"
+        local vt_number="7"
+        exec_start="/usr/bin/openvt -f -w -c ${vt_number} -- /usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 -nolisten tcp"
     fi
 
     {
@@ -631,7 +695,7 @@ create_systemd_service() {
         echo "WorkingDirectory=${install_dir}"
         echo "PermissionsStartOnly=true"
         printf 'Environment=PYTHONUNBUFFERED=1\n'
-        printf 'Environment=XDG_RUNTIME_DIR=/run/user/%%U\n'
+        printf 'Environment=XDG_RUNTIME_DIR=%s\n' "${runtime_dir}"
         if [[ -n ${SDL_DRIVER} ]]; then
             printf 'Environment=SDL_VIDEODRIVER=%s\n' "${SDL_DRIVER}"
             if [[ ${SDL_DRIVER} == "fbcon" ]]; then
@@ -641,8 +705,8 @@ create_systemd_service() {
                 printf 'Environment=DISPLAY=:0\n'
             fi
         fi
-        printf 'ExecStartPre=/bin/mkdir -p /run/user/%%U\n'
-        printf 'ExecStartPre=/bin/chown %s:%s /run/user/%%U\n' "${TARGET_USER}" "${TARGET_USER}"
+        printf 'ExecStartPre=/bin/mkdir -p %s\n' "${runtime_dir}"
+        printf 'ExecStartPre=/bin/chown %s:%s %s\n' "${TARGET_USER}" "${TARGET_USER}" "${runtime_dir}"
         echo "ExecStart=${exec_start}"
         echo "Restart=on-failure"
         echo "RestartSec=5"
@@ -809,6 +873,7 @@ main() {
     setup_python_env
     validate_sdl_driver
     ensure_xinit_packages
+    configure_xwrapper_permissions
     maybe_migrate_legacy_config
     disable_legacy_autostart
     configure_boot_config
