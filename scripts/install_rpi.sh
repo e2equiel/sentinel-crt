@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.1"
+SCRIPT_VERSION="1.1.2"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -14,6 +14,8 @@ HAS_GRAPHICAL_TARGET="false"
 VIDEO_MODE=""
 SDTV_MODE=""
 SDL_DRIVER=""
+SDL_FALLBACK_DRIVER=""
+SDL_DRIVER_NOTE=""
 FRESH_CLONE="false"
 MIGRATED_CONFIG="false"
 LEGACY_START_SCRIPT_DISABLED=""
@@ -222,6 +224,8 @@ prompt_sdtv_mode() {
 }
 
 determine_sdl_driver() {
+    SDL_FALLBACK_DRIVER=""
+
     if [[ ${VIDEO_MODE} == "composite" ]]; then
         SDL_DRIVER="fbcon"
         return
@@ -230,8 +234,89 @@ determine_sdl_driver() {
     if [[ ${HAS_GRAPHICAL_TARGET} == "true" ]]; then
         SDL_DRIVER="x11"
     else
-        SDL_DRIVER="KMSDRM"
+        if [[ -e /dev/dri/card0 ]]; then
+            SDL_DRIVER="kmsdrm"
+            SDL_FALLBACK_DRIVER="fbcon"
+        else
+            SDL_DRIVER="fbcon"
+        fi
     fi
+}
+
+sdl_driver_self_test() {
+    local driver="$1"
+    local venv_dir="$2"
+
+    sudo -u "${TARGET_USER}" -H env SDL_VIDEODRIVER="${driver}" "${venv_dir}/bin/python" - <<'PY'
+import sys
+
+try:
+    import pygame
+    pygame.display.init()
+    pygame.display.set_mode((1, 1))
+except Exception as exc:
+    print(exc, file=sys.stderr)
+    sys.exit(1)
+finally:
+    try:
+        pygame.display.quit()
+    except Exception:
+        pass
+PY
+}
+
+validate_sdl_driver() {
+    local install_dir="${TARGET_HOME}/sentinel-crt"
+    local venv_dir="${install_dir}/venv"
+    local driver="${SDL_DRIVER}"
+    local fallback="${SDL_FALLBACK_DRIVER:-}"
+
+    if [[ -z ${driver} ]]; then
+        return
+    fi
+
+    if [[ ${driver} == "x11" ]]; then
+        return
+    fi
+
+    if [[ ! -x ${venv_dir}/bin/python ]]; then
+        echo "[WARN] Unable to validate SDL driver; ${venv_dir}/bin/python not found."
+        return
+    fi
+
+    local log_file="/tmp/sentinel-sdl-test.log"
+
+    if sdl_driver_self_test "${driver}" "${venv_dir}" 2>"${log_file}"; then
+        rm -f "${log_file}"
+        return
+    fi
+
+    SDL_DRIVER_NOTE="SDL driver '${driver}' was unavailable during validation."
+
+    echo "[WARN] SDL driver '${driver}' failed the availability test. Details:" >&2
+    sed 's/^/        /' "${log_file}" >&2 || true
+
+    if [[ -z ${fallback} ]]; then
+        echo "[WARN] No fallback SDL driver configured; continuing with '${driver}'." >&2
+        SDL_DRIVER_NOTE+=" Manual adjustment may be required."
+        rm -f "${log_file}"
+        return
+    fi
+
+    echo "[INFO] Falling back to SDL driver '${fallback}'."
+    SDL_DRIVER="${fallback}"
+    SDL_FALLBACK_DRIVER=""
+
+    if sdl_driver_self_test "${SDL_DRIVER}" "${venv_dir}" 2>"${log_file}"; then
+        SDL_DRIVER_NOTE+=" Using fallback '${SDL_DRIVER}'."
+        rm -f "${log_file}"
+        return
+    fi
+
+    echo "[WARN] Fallback SDL driver '${SDL_DRIVER}' also failed. Installation will continue; update the driver manually if needed." >&2
+    SDL_DRIVER_NOTE+=" Fallback '${SDL_DRIVER}' also failed self-test."
+    sed 's/^/        /' "${log_file}" >&2 || true
+    rm -f "${log_file}"
 }
 
 select_first_available() {
@@ -595,6 +680,14 @@ print_post_install_notes() {
 - Boot config: ${BOOT_CONFIG_PATH}
 - Default boot target: ${DEFAULT_SYSTEM_TARGET}
 
+EOF
+
+    if [[ -n ${SDL_DRIVER_NOTE} ]]; then
+        echo "- SDL driver note: ${SDL_DRIVER_NOTE}"
+    fi
+
+    cat <<EOF
+
 Next steps:
 1. Update ${TARGET_HOME}/sentinel-crt/settings/core.yaml with your MQTT credentials,
    Frigate details, and Mapbox token. Additional modules/services can be configured
@@ -638,6 +731,7 @@ main() {
     update_system_packages
     clone_or_update_repo
     setup_python_env
+    validate_sdl_driver
     maybe_migrate_legacy_config
     disable_legacy_autostart
     configure_boot_config
