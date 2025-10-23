@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.5"
+SCRIPT_VERSION="1.1.6"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -17,6 +17,9 @@ SDL_DRIVER=""
 SDL_FALLBACK_DRIVER=""
 SDL_DRIVER_NOTE=""
 LAUNCH_METHOD="direct"
+TARGET_USER=""
+TARGET_HOME=""
+TARGET_UID=""
 declare -a GROUPS_ADDED=()
 declare -a REQUIRED_GROUPS=(
     video
@@ -167,6 +170,7 @@ prompt_target_user() {
 
     TARGET_USER=${chosen_user}
     TARGET_HOME=$(getent passwd "${TARGET_USER}" | cut -d: -f6)
+    TARGET_UID=$(id -u "${TARGET_USER}")
     if [[ -z ${TARGET_HOME} || ! -d ${TARGET_HOME} ]]; then
         echo "[ERROR] Could not determine home directory for '${TARGET_USER}'." >&2
         exit 1
@@ -663,13 +667,18 @@ create_systemd_service() {
     local venv_dir="${install_dir}/venv"
     local wanted_target="multi-user.target"
     local exec_start="${venv_dir}/bin/python ${install_dir}/sentinel_crt.py --fullscreen"
+    local user_uid="${TARGET_UID}"
+    if [[ -z ${user_uid} ]]; then
+        user_uid=$(id -u "${TARGET_USER}")
+    fi
+    local runtime_dir="/run/user/${user_uid}"
 
     if [[ ${HAS_GRAPHICAL_TARGET} == "true" ]]; then
         wanted_target="graphical.target"
     fi
 
     if [[ ${LAUNCH_METHOD} == "xinit" ]]; then
-        exec_start="/usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 vt1 -nolisten tcp"
+        exec_start="/usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 vt07 -nolisten tcp"
     fi
 
     {
@@ -684,7 +693,7 @@ create_systemd_service() {
         echo "WorkingDirectory=${install_dir}"
         echo "PermissionsStartOnly=true"
         printf 'Environment=PYTHONUNBUFFERED=1\n'
-        printf 'Environment=XDG_RUNTIME_DIR=/run/user/%%U\n'
+        printf 'Environment=XDG_RUNTIME_DIR=%s\n' "${runtime_dir}"
         if [[ -n ${SDL_DRIVER} ]]; then
             printf 'Environment=SDL_VIDEODRIVER=%s\n' "${SDL_DRIVER}"
             if [[ ${SDL_DRIVER} == "fbcon" ]]; then
@@ -694,8 +703,8 @@ create_systemd_service() {
                 printf 'Environment=DISPLAY=:0\n'
             fi
         fi
-        printf 'ExecStartPre=/bin/mkdir -p /run/user/%%U\n'
-        printf 'ExecStartPre=/bin/chown %s:%s /run/user/%%U\n' "${TARGET_USER}" "${TARGET_USER}"
+        printf 'ExecStartPre=/bin/mkdir -p %s\n' "${runtime_dir}"
+        printf 'ExecStartPre=/bin/chown %s:%s %s\n' "${TARGET_USER}" "${TARGET_USER}" "${runtime_dir}"
         echo "ExecStart=${exec_start}"
         echo "Restart=on-failure"
         echo "RestartSec=5"
