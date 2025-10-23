@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.8"
+SCRIPT_VERSION="1.1.9"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -69,6 +69,7 @@ declare -a DESKTOP_PACKAGES=(
 declare -a HEADLESS_PACKAGES=()
 declare -a XINIT_PACKAGES=(
     xserver-xorg
+    xserver-xorg-legacy
     x11-xserver-utils
     xinit
     kbd
@@ -680,7 +681,11 @@ create_systemd_service() {
 
     if [[ ${LAUNCH_METHOD} == "xinit" ]]; then
         local vt_number="7"
-        exec_start="/usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 vt${vt_number} -nolisten tcp"
+        local x_server_bin="/usr/lib/xorg/Xorg.wrap"
+        if [[ ! -x ${x_server_bin} ]]; then
+            x_server_bin="/usr/lib/xorg/Xorg"
+        fi
+        exec_start="/usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- ${x_server_bin} :0 vt${vt_number} -nolisten tcp"
     fi
 
     {
