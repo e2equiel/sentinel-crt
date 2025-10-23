@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.6"
+SCRIPT_VERSION="1.1.7"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -71,6 +71,7 @@ declare -a XINIT_PACKAGES=(
     xserver-xorg
     x11-xserver-utils
     xinit
+    kbd
 )
 
 print_banner() {
@@ -678,7 +679,8 @@ create_systemd_service() {
     fi
 
     if [[ ${LAUNCH_METHOD} == "xinit" ]]; then
-        exec_start="/usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 vt07 -nolisten tcp"
+        local vt_number="7"
+        exec_start="/usr/bin/openvt -f -w -c ${vt_number} -- /usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 -nolisten tcp"
     fi
 
     {
