@@ -121,7 +121,8 @@ curl -sSL https://raw.githubusercontent.com/e2equiel/sentinel-crt/main/scripts/i
 > The installer also ensures the selected user belongs to the `video`, `input`,
 > and `render` groups, provisions the runtime directory SDL needs to open the
 > KMS/DRM devices under systemd, and will fall back to a minimal X11 + `xinit`
-> launcher automatically if direct framebuffer drivers are unavailable.
+> launcher automatically if direct framebuffer drivers are unavailable—even when
+> no secondary framebuffer driver is present to try first.
 
 ### 1. Prepare Raspberry OS
 

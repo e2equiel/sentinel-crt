@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.3"
+SCRIPT_VERSION="1.1.4"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -331,9 +331,11 @@ validate_sdl_driver() {
     sed 's/^/        /' "${log_file}" >&2 || true
 
     if [[ -z ${fallback} ]]; then
-        echo "[WARN] No fallback SDL driver configured; continuing with '${driver}'." >&2
-        SDL_DRIVER_NOTE+=" Manual adjustment may be required."
+        echo "[WARN] No fallback SDL driver configured; switching to an xinit-managed X11 session." >&2
+        SDL_DRIVER_NOTE+=" Installer will launch via xinit-managed X11 fallback."
         rm -f "${log_file}"
+        SDL_DRIVER="x11"
+        LAUNCH_METHOD="xinit"
         return
     fi
 
