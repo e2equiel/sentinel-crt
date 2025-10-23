@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.4"
+SCRIPT_VERSION="1.1.5"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -402,6 +402,59 @@ ensure_xinit_packages() {
     echo
     echo "[INFO] Installing minimal X11 packages for xinit fallback..."
     install_if_available "${XINIT_PACKAGES[@]}"
+}
+
+configure_xwrapper_permissions() {
+    if [[ ${LAUNCH_METHOD} != "xinit" ]]; then
+        return
+    fi
+
+    local wrapper_path="/etc/X11/Xwrapper.config"
+    local backup_path="${wrapper_path}.sentinel-backup"
+    local needs_update="false"
+
+    mkdir -p /etc/X11
+
+    if [[ ! -f ${wrapper_path} ]]; then
+        needs_update="true"
+    else
+        local allowed_line
+        allowed_line=$(grep -E '^allowed_users=' "${wrapper_path}" || true)
+        if [[ ${allowed_line} != "allowed_users=anybody" ]]; then
+            needs_update="true"
+        fi
+
+        if ! grep -qE '^needs_root_rights=' "${wrapper_path}"; then
+            needs_update="true"
+        fi
+    fi
+
+    if [[ ${needs_update} != "true" ]]; then
+        return
+    fi
+
+    if [[ -f ${wrapper_path} && ! -f ${backup_path} ]]; then
+        cp "${wrapper_path}" "${backup_path}"
+        chown root:root "${backup_path}"
+        chmod 0644 "${backup_path}"
+    fi
+
+    local tmp_path="${wrapper_path}.tmp"
+    {
+        echo "allowed_users=anybody"
+        echo "needs_root_rights=no"
+        if [[ -f ${wrapper_path} ]]; then
+            grep -vE '^(allowed_users|needs_root_rights)=' "${wrapper_path}" || true
+        fi
+    } > "${tmp_path}"
+
+    mv "${tmp_path}" "${wrapper_path}"
+    chmod 0644 "${wrapper_path}"
+
+    echo "[INFO] Configured ${wrapper_path} to allow non-console Xorg sessions."
+    if [[ -f ${backup_path} ]]; then
+        echo "[INFO] Previous Xwrapper configuration backed up to ${backup_path}."
+    fi
 }
 
 update_system_packages() {
@@ -809,6 +862,7 @@ main() {
     setup_python_env
     validate_sdl_driver
     ensure_xinit_packages
+    configure_xwrapper_permissions
     maybe_migrate_legacy_config
     disable_legacy_autostart
     configure_boot_config
