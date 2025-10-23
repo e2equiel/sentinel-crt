@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.7"
+SCRIPT_VERSION="1.1.8"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -447,7 +447,7 @@ configure_xwrapper_permissions() {
     local tmp_path="${wrapper_path}.tmp"
     {
         echo "allowed_users=anybody"
-        echo "needs_root_rights=no"
+        echo "needs_root_rights=yes"
         if [[ -f ${wrapper_path} ]]; then
             grep -vE '^(allowed_users|needs_root_rights)=' "${wrapper_path}" || true
         fi
@@ -680,7 +680,7 @@ create_systemd_service() {
 
     if [[ ${LAUNCH_METHOD} == "xinit" ]]; then
         local vt_number="7"
-        exec_start="/usr/bin/openvt -f -w -c ${vt_number} -- /usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 -nolisten tcp"
+        exec_start="/usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 vt${vt_number} -nolisten tcp"
     fi
 
     {
