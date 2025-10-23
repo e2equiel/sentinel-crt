@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.2"
+SCRIPT_VERSION="1.1.3"
 
 BOOT_CONFIG_PATH="/boot/config.txt"
 BOOT_CONFIG_BACKUP=""
@@ -16,6 +16,13 @@ SDTV_MODE=""
 SDL_DRIVER=""
 SDL_FALLBACK_DRIVER=""
 SDL_DRIVER_NOTE=""
+LAUNCH_METHOD="direct"
+declare -a GROUPS_ADDED=()
+declare -a REQUIRED_GROUPS=(
+    video
+    input
+    render
+)
 FRESH_CLONE="false"
 MIGRATED_CONFIG="false"
 LEGACY_START_SCRIPT_DISABLED=""
@@ -57,6 +64,11 @@ declare -a DESKTOP_PACKAGES=(
 )
 
 declare -a HEADLESS_PACKAGES=()
+declare -a XINIT_PACKAGES=(
+    xserver-xorg
+    x11-xserver-utils
+    xinit
+)
 
 print_banner() {
     cat <<'BANNER'
@@ -159,6 +171,26 @@ prompt_target_user() {
         echo "[ERROR] Could not determine home directory for '${TARGET_USER}'." >&2
         exit 1
     fi
+}
+
+ensure_target_user_groups() {
+    local group
+    for group in "${REQUIRED_GROUPS[@]}"; do
+        if ! getent group "${group}" >/dev/null 2>&1; then
+            continue
+        fi
+
+        if id -nG "${TARGET_USER}" | tr ' ' '\n' | grep -qx "${group}"; then
+            continue
+        fi
+
+        if usermod -aG "${group}" "${TARGET_USER}"; then
+            GROUPS_ADDED+=("${group}")
+            echo "[INFO] Added ${TARGET_USER} to '${group}' group for display access."
+        else
+            echo "[WARN] Failed to add ${TARGET_USER} to '${group}' group. You may need to adjust group membership manually." >&2
+        fi
+    done
 }
 
 prompt_video_output() {
@@ -276,6 +308,7 @@ validate_sdl_driver() {
     fi
 
     if [[ ${driver} == "x11" ]]; then
+        LAUNCH_METHOD="direct"
         return
     fi
 
@@ -288,6 +321,7 @@ validate_sdl_driver() {
 
     if sdl_driver_self_test "${driver}" "${venv_dir}" 2>"${log_file}"; then
         rm -f "${log_file}"
+        LAUNCH_METHOD="direct"
         return
     fi
 
@@ -310,13 +344,17 @@ validate_sdl_driver() {
     if sdl_driver_self_test "${SDL_DRIVER}" "${venv_dir}" 2>"${log_file}"; then
         SDL_DRIVER_NOTE+=" Using fallback '${SDL_DRIVER}'."
         rm -f "${log_file}"
+        LAUNCH_METHOD="direct"
         return
     fi
 
-    echo "[WARN] Fallback SDL driver '${SDL_DRIVER}' also failed. Installation will continue; update the driver manually if needed." >&2
-    SDL_DRIVER_NOTE+=" Fallback '${SDL_DRIVER}' also failed self-test."
+    echo "[WARN] Fallback SDL driver '${SDL_DRIVER}' also failed. Installation will continue with an xinit-managed X server." >&2
+    SDL_DRIVER_NOTE+=" Fallback '${SDL_DRIVER}' also failed self-test; switching to xinit-managed X11." 
     sed 's/^/        /' "${log_file}" >&2 || true
     rm -f "${log_file}"
+
+    SDL_DRIVER="x11"
+    LAUNCH_METHOD="xinit"
 }
 
 select_first_available() {
@@ -352,6 +390,16 @@ install_if_available() {
     else
         echo "[INFO] All required system packages are already installed."
     fi
+}
+
+ensure_xinit_packages() {
+    if [[ ${LAUNCH_METHOD} != "xinit" ]]; then
+        return
+    fi
+
+    echo
+    echo "[INFO] Installing minimal X11 packages for xinit fallback..."
+    install_if_available "${XINIT_PACKAGES[@]}"
 }
 
 update_system_packages() {
@@ -559,30 +607,47 @@ create_systemd_service() {
     local install_dir="${TARGET_HOME}/sentinel-crt"
     local venv_dir="${install_dir}/venv"
     local wanted_target="multi-user.target"
+    local exec_start="${venv_dir}/bin/python ${install_dir}/sentinel_crt.py --fullscreen"
 
     if [[ ${HAS_GRAPHICAL_TARGET} == "true" ]]; then
         wanted_target="graphical.target"
     fi
 
-    cat <<EOF > "${service_path}"
-[Unit]
-Description=Sentinel CRT Display
-After=network-online.target
-Wants=network-online.target
+    if [[ ${LAUNCH_METHOD} == "xinit" ]]; then
+        exec_start="/usr/bin/xinit ${install_dir}/scripts/run_via_xinit.sh -- :0 vt1 -nolisten tcp"
+    fi
 
-[Service]
-Type=simple
-User=${TARGET_USER}
-WorkingDirectory=${install_dir}
-Environment=PYTHONUNBUFFERED=1
-Environment=SDL_VIDEODRIVER=${SDL_DRIVER}
-ExecStart=${venv_dir}/bin/python ${install_dir}/sentinel_crt.py --fullscreen
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=${wanted_target}
-EOF
+    {
+        echo "[Unit]"
+        echo "Description=Sentinel CRT Display"
+        echo "After=network-online.target systemd-logind.service"
+        echo "Wants=network-online.target"
+        echo
+        echo "[Service]"
+        echo "Type=simple"
+        echo "User=${TARGET_USER}"
+        echo "WorkingDirectory=${install_dir}"
+        echo "PermissionsStartOnly=true"
+        printf 'Environment=PYTHONUNBUFFERED=1\n'
+        printf 'Environment=XDG_RUNTIME_DIR=/run/user/%%U\n'
+        if [[ -n ${SDL_DRIVER} ]]; then
+            printf 'Environment=SDL_VIDEODRIVER=%s\n' "${SDL_DRIVER}"
+            if [[ ${SDL_DRIVER} == "fbcon" ]]; then
+                printf 'Environment=SDL_FBDEV=/dev/fb0\n'
+            fi
+            if [[ ${SDL_DRIVER} == "x11" ]]; then
+                printf 'Environment=DISPLAY=:0\n'
+            fi
+        fi
+        printf 'ExecStartPre=/bin/mkdir -p /run/user/%%U\n'
+        printf 'ExecStartPre=/bin/chown %s:%s /run/user/%%U\n' "${TARGET_USER}" "${TARGET_USER}"
+        echo "ExecStart=${exec_start}"
+        echo "Restart=on-failure"
+        echo "RestartSec=5"
+        echo
+        echo "[Install]"
+        echo "WantedBy=${wanted_target}"
+    } > "${service_path}"
 
     chmod 0644 "${service_path}"
 
@@ -676,6 +741,7 @@ print_post_install_notes() {
 - Virtualenv: ${TARGET_HOME}/sentinel-crt/venv
 - Systemd unit: sentinel-crt.service
 - SDL video driver: ${SDL_DRIVER}
+- Launch method: ${LAUNCH_METHOD}
 - Raspberry Pi OS: ${OS_ID} ${OS_VERSION_ID} (${OS_VERSION_CODENAME:-unknown})
 - Boot config: ${BOOT_CONFIG_PATH}
 - Default boot target: ${DEFAULT_SYSTEM_TARGET}
@@ -684,6 +750,13 @@ EOF
 
     if [[ -n ${SDL_DRIVER_NOTE} ]]; then
         echo "- SDL driver note: ${SDL_DRIVER_NOTE}"
+    fi
+
+    if [[ ${#GROUPS_ADDED[@]} -gt 0 ]]; then
+        local joined_groups=""
+        printf -v joined_groups '%s, ' "${GROUPS_ADDED[@]}"
+        joined_groups=${joined_groups%, }
+        echo "- Added ${TARGET_USER} to groups: ${joined_groups}"
     fi
 
     cat <<EOF
@@ -726,12 +799,14 @@ main() {
     detect_os_details
     detect_default_target
     prompt_target_user
+    ensure_target_user_groups
     prompt_video_output
     determine_sdl_driver
     update_system_packages
     clone_or_update_repo
     setup_python_env
     validate_sdl_driver
+    ensure_xinit_packages
     maybe_migrate_legacy_config
     disable_legacy_autostart
     configure_boot_config

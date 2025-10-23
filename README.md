@@ -118,6 +118,10 @@ curl -sSL https://raw.githubusercontent.com/e2equiel/sentinel-crt/main/scripts/i
 > ℹ️ The script is safe to rerun. Existing repositories, virtual environments,
 > and modular YAML configuration files are preserved. Legacy `config.py`
 > settings are migrated automatically on first run.
+> The installer also ensures the selected user belongs to the `video`, `input`,
+> and `render` groups, provisions the runtime directory SDL needs to open the
+> KMS/DRM devices under systemd, and will fall back to a minimal X11 + `xinit`
+> launcher automatically if direct framebuffer drivers are unavailable.
 
 ### 1. Prepare Raspberry OS
 
