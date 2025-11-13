@@ -300,9 +300,11 @@ class SentinelApp:
         self.screen.blit(title_surface, title_rect)
 
         bar_x = header_rect.right - 5 * 8
+        base_y = header_rect.bottom - 2  # Fixed baseline for all bars
         for i, height in enumerate(self.level_bars_heights):
-            # Bars grow from bottom to top
-            pygame.draw.rect(self.screen, color, (bar_x + i * 8, header_rect.bottom - height - 2, 4, height))
+            # Bars grow from bottom to top with fixed baseline
+            bar_height = round(height)
+            pygame.draw.rect(self.screen, color, (bar_x + i * 8, base_y - bar_height, 4, bar_height))
         sys_load_surface = self.font_medium.render(f"SYS-LOAD: {self.sys_load_string}", True, color)
         sys_load_rect = sys_load_surface.get_rect(right=bar_x - 15, centery=header_rect.centery)
         self.screen.blit(sys_load_surface, sys_load_rect)
