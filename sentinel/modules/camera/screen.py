@@ -111,8 +111,12 @@ class CameraModule(ScreenModule):
         if self.app and level != self._last_alert_level:
             self._last_alert_level = level
             self.app.event_bus.publish("ui.alert", {"level": level})
+
+        # Always report current state to keep it fresh and prevent expiration
+        if self.app:
             if level and level != "none":
-                self.report_state(level, metadata={"source": "alerts"})
+                # Report with 20s expiration - will be refreshed every frame while alert is active
+                self.report_state(level, metadata={"source": "alerts"}, expires_in=20.0)
             else:
                 self.report_state(None)
 
