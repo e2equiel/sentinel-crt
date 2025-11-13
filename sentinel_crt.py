@@ -83,8 +83,10 @@ class SentinelApp:
         self.pattern_speed_px_s = 10.0
         self.sys_load_string = "000000"
         self.sys_load_update_timer = 0.0
-        self.level_bars_heights = [random.randint(2, 18) for _ in range(5)]
+        self.level_bars_heights = [float(random.randint(2, 18)) for _ in range(5)]
+        self.level_bars_target_heights = list(self.level_bars_heights)
         self.level_bars_update_timer = 0.0
+        self.level_bars_lerp_speed = 15.0  # Speed of interpolation
 
         self.event_bus.subscribe("system.restart", self._handle_restart_event)
         self.event_bus.subscribe("ui.alert", self._handle_alert_event)
@@ -243,9 +245,23 @@ class SentinelApp:
         if now > self.sys_load_update_timer:
             self.sys_load_string = f"{random.randint(0, 0xFFFFFF):06X}"
             self.sys_load_update_timer = now + 0.2
+
+        # Update target heights for bars periodically
         if now > self.level_bars_update_timer:
-            self.level_bars_heights = [random.randint(2, 18) for _ in range(5)]
+            self.level_bars_target_heights = [float(random.randint(2, 18)) for _ in range(5)]
             self.level_bars_update_timer = now + 0.3
+
+        # Smoothly interpolate current heights towards target heights every frame
+        for i in range(len(self.level_bars_heights)):
+            current = self.level_bars_heights[i]
+            target = self.level_bars_target_heights[i]
+            diff = target - current
+
+            # Lerp towards target
+            if abs(diff) > 0.1:
+                self.level_bars_heights[i] += diff * self.level_bars_lerp_speed * dt
+            else:
+                self.level_bars_heights[i] = target
 
     # ------------------------------------------------------------------ rendering
     def draw(self) -> None:
