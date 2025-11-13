@@ -219,8 +219,8 @@ class RadarController:
 
         frac_x = (lon + 180.0) / 360.0 * (2**zoom) - xtile
         frac_y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * (2**zoom) - ytile
-        offset_x = (map_rect.width / 2) - (frac_x * 256) - ((width_tiles // 2) * 256)
-        offset_y = (map_rect.height / 2) - (frac_y * 256) - ((height_tiles // 2) * 256)
+        offset_x = (visible_rect.width / 2) - (frac_x * 256) - ((width_tiles // 2) * 256)
+        offset_y = (visible_rect.height / 2) - (frac_y * 256) - ((height_tiles // 2) * 256)
 
         with self._lock:
             self._map_surface = map_surface
