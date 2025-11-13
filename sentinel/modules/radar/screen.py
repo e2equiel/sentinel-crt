@@ -74,9 +74,9 @@ class RadarModule(ScreenModule):
         flights = self.controller.active_flights
         if flights:
             count = len(flights)
-            if count != self._last_state_flights:
-                self.report_state("air-traffic", metadata={"count": count})
-                self._last_state_flights = count
+            # Report state every frame while flights are active to keep priority alive
+            self.report_state("air-traffic", metadata={"count": count}, expires_in=30.0)
+            self._last_state_flights = count
         else:
             if self._last_state_flights:
                 self.report_state(None)
