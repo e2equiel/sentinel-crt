@@ -86,7 +86,7 @@ class SentinelApp:
         self.level_bars_heights = [float(random.randint(2, 18)) for _ in range(5)]
         self.level_bars_target_heights = list(self.level_bars_heights)
         self.level_bars_update_timer = 0.0
-        self.level_bars_lerp_speed = 15.0  # Speed of interpolation
+        self.level_bars_lerp_speed = 5.0  # Speed of interpolation (lower = slower)
 
         self.event_bus.subscribe("system.restart", self._handle_restart_event)
         self.event_bus.subscribe("ui.alert", self._handle_alert_event)
@@ -249,7 +249,7 @@ class SentinelApp:
         # Update target heights for bars periodically
         if now > self.level_bars_update_timer:
             self.level_bars_target_heights = [float(random.randint(2, 18)) for _ in range(5)]
-            self.level_bars_update_timer = now + 0.3
+            self.level_bars_update_timer = now + 1.0
 
         # Smoothly interpolate current heights towards target heights every frame
         for i in range(len(self.level_bars_heights)):
@@ -301,7 +301,8 @@ class SentinelApp:
 
         bar_x = header_rect.right - 5 * 8
         for i, height in enumerate(self.level_bars_heights):
-            pygame.draw.rect(self.screen, color, (bar_x + i * 8, header_rect.centery - height/2 + 1, 4, height))
+            # Bars grow from bottom to top
+            pygame.draw.rect(self.screen, color, (bar_x + i * 8, header_rect.bottom - height - 2, 4, height))
         sys_load_surface = self.font_medium.render(f"SYS-LOAD: {self.sys_load_string}", True, color)
         sys_load_rect = sys_load_surface.get_rect(right=bar_x - 15, centery=header_rect.centery)
         self.screen.blit(sys_load_surface, sys_load_rect)
